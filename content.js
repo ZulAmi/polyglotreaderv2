@@ -7,7 +7,14 @@ class PolyglotReader {
       learningFocus: 'translate',
       autoDetectLanguage: true,
       showPronunciation: true,
-      showExamples: true
+      showExamples: true,
+      // Vocabulary performance/quality strategy
+      // 'adaptive' -> compact JSON for long text, full for short
+      // 'full'     -> always full detailed prompt
+      // 'fast'     -> always compact JSON prompt
+      vocabStrategy: 'adaptive',
+      maxVocabularyChars: 400,
+      vocabMaxItems: 12
     };
     this.selectedText = '';
     this.isTooltipVisible = false;
@@ -273,6 +280,16 @@ class PolyglotReader {
 
       const initializedApis = Object.entries(this.aiApis).filter(([key, value]) => value !== null);
       console.log(`🎉 Successfully initialized ${initializedApis.length}/7 AI APIs:`, initializedApis.map(([key]) => key));
+      
+      // Fire-and-forget warm-up for Language Model to reduce first-token latency (non-blocking)
+      if (this.aiApis.languageModel) {
+        try {
+          Promise.race([
+            this.aiApis.languageModel.prompt('ok', { language: 'en' }),
+            new Promise((_, r) => setTimeout(() => r(new Error('warmup-timeout')), 1500))
+          ]).catch(() => {/* ignore warmup timeout */});
+        } catch (_) { /* ignore */ }
+      }
       
     } catch (error) {
       console.error('Error initializing AI APIs:', error);
@@ -974,27 +991,30 @@ class PolyglotReader {
     try {
       const langCode = this.getLanguageCode(targetLang);
       let prompt = '';
+      let usedCompact = false; // track if we use compact JSON prompt for vocabulary
       
       switch (focus) {
         case 'vocabulary':
           console.log(`📚 Vocabulary analysis requested for: "${text}"`);
           console.log(`🤖 Language Model available:`, !!this.aiApis.languageModel);
           if (this.aiApis.languageModel) {
-            const isLong = text.length > 400;
-            if (isLong) {
-              // Faster, more concise prompt for long passages
-              prompt = `Analyze the vocabulary in: "${text}"
+            const strategy = this.settings.vocabStrategy || 'adaptive';
+            const isLong = text.length > (this.settings.maxVocabularyChars || 400);
+            const useCompact = (strategy === 'fast') || (strategy === 'adaptive' && isLong);
+            usedCompact = useCompact;
+            
+            if (useCompact) {
+              const sample = isLong ? text.slice(0, this.settings.maxVocabularyChars) : text;
+              const maxItems = this.settings.vocabMaxItems || 12;
+              // Compact JSON-only prompt. Output will be parsed/pretty-printed locally.
+              prompt = `Extract key vocabulary from the passage.
+Return ONLY a valid JSON array (no preface or trailing text) with up to ${maxItems} items.
+Each item must be: {"word":"...", "pos":"noun|verb|adj|adv|other", "def":"<=16 words", "example":"<=12 words"}.
 
-Return ONLY the top 8–12 most important words. For each, include:
-- Word: [word]
-- Definition: [short and simple]
-- Part of speech: [noun/verb/adj/etc.]
-- Difficulty: [Beginner/Intermediate/Advanced]
-- 1 example sentence (very short, numbered as "1. ...")
-
-Be concise. Do not translate the entire passage. Use clear bullet points. Respond in ${targetLang === 'en' ? 'English' : targetLang}.`;
+Text:
+"""${sample}"""`;
             } else {
-              // Full prompt for shorter texts
+              // Full, detailed prompt
               prompt = `Analyze the vocabulary in: "${text}"
 
 Please provide a structured vocabulary breakdown:
@@ -1123,6 +1143,10 @@ Format as clear sections with emojis. Respond in ${targetLang}.`;
           
           // Format vocabulary analysis for better display
           if (focus === 'vocabulary') {
+            if (usedCompact) {
+              const html = this.tryFormatVocabJSON(result);
+              if (html) return html;
+            }
             return this.formatVocabularyAnalysis(result);
           }
           
@@ -1134,12 +1158,13 @@ Format as clear sections with emojis. Respond in ${targetLang}.`;
               console.log(`🔄 Retrying ${focus} prompt with English language...`);
               const result = await this.aiApis.languageModel.prompt(prompt, { language: 'en' });
               console.log(`✅ ${focus} analysis completed with fallback, length: ${result.length}`);
-              
-              // Format vocabulary analysis for better display
               if (focus === 'vocabulary') {
+                if (usedCompact) {
+                  const html = this.tryFormatVocabJSON(result);
+                  if (html) return html;
+                }
                 return this.formatVocabularyAnalysis(result);
               }
-              
               return result;
             } catch (retryError) {
               console.error(`❌ ${focus} prompt failed even with fallback:`, retryError);
@@ -1185,6 +1210,32 @@ Format as clear sections with emojis. Respond in ${targetLang}.`;
     formatted = formatted.replace(/\n/g, '<br>');
     
     return formatted;
+  }
+
+  // Parse compact JSON vocabulary output and render quick HTML
+  tryFormatVocabJSON(result) {
+    try {
+      const clean = String(result || '').trim().replace(/^```json\s*|^```|```$/g, '').trim();
+      const data = JSON.parse(clean);
+      if (!Array.isArray(data)) return null;
+      const limit = this.settings.vocabMaxItems || 12;
+      const items = data.slice(0, limit);
+      const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+      return `
+        <div class="polyglot-vocabulary-analysis">
+          ${items.map(it => `
+            <div class="word-card">
+              <div class="word-title">${esc(it.word)}</div>
+              <div>Part of speech: <em>${esc(it.pos)}</em></div>
+              <div>Definition: ${esc(it.def)}</div>
+              ${it.example ? `<div class="example-sentence">• ${esc(it.example)}</div>` : ''}
+            </div>
+          `).join('')}
+        </div>
+      `;
+    } catch (_) {
+      return null;
+    }
   }
 
   displayResults(originalText, translation, pronunciation, sourceLang, targetLang, learningContent, learningFocus, requestId) {
@@ -1286,7 +1337,6 @@ Format as clear sections with emojis. Respond in ${targetLang}.`;
       html += `
         <div class="polyglot-action-buttons">
           <button class="polyglot-button" onclick="navigator.clipboard.writeText('${translation}')">Copy Translation</button>
-          <button class="polyglot-button primary" onclick="window.open('https://translate.google.com/?sl=${sourceLang}&tl=${targetLang}&text=${encodeURIComponent(originalText)}', '_blank')">More Details</button>
         </div>
       `;
     }
