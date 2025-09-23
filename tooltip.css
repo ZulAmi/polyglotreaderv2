@@ -9,8 +9,8 @@
   font-size: 14px;
   line-height: 1.5;
   color: #374151;
-  max-width: 400px;
-  min-width: 300px;
+  max-width: 650px;
+  min-width: 550px;
   opacity: 0;
   transform: translateY(10px) scale(0.95);
   transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
@@ -91,6 +91,8 @@
   display: flex;
   gap: 8px;
   align-items: center;
+  position: relative;
+  z-index: 1000001;
 }
 
 .polyglot-select {
@@ -103,6 +105,9 @@
   cursor: pointer;
   transition: all 0.2s ease;
   min-width: 100px;
+  position: relative;
+  z-index: 1000000;
+  pointer-events: auto;
 }
 
 .polyglot-select:focus {
@@ -115,17 +120,55 @@
   border-color: #9ca3af;
 }
 
+.polyglot-select option {
+  background: white;
+  color: #374151;
+  padding: 8px 12px;
+}
+
+.polyglot-select option:hover {
+  background: #f3f4f6;
+}
+
 .polyglot-tooltip-content {
   padding: 20px;
-  max-height: 300px;
+  max-height: 350px;
   overflow-y: auto;
+  max-width: 650px;
+  min-width: 550px;
+}
+
+/* Side-by-side layout */
+.polyglot-content-row {
+  display: flex;
+  gap: 20px;
+  align-items: flex-start;
+  margin-bottom: 16px;
+}
+
+.polyglot-content-column {
+  flex: 1;
+  min-width: 0; /* Allow content to shrink */
+}
+
+/* Responsive: stack vertically on smaller screens */
+@media (max-width: 768px) {
+  .polyglot-content-row {
+    flex-direction: column;
+    gap: 12px;
+  }
+  
+  .polyglot-tooltip-content {
+    max-width: 350px;
+    min-width: 300px;
+  }
 }
 
 .polyglot-original-text {
   background: #f8fafc;
   padding: 12px 16px;
   border-radius: 8px;
-  margin-bottom: 16px;
+  margin-bottom: 0; /* Remove margin in side-by-side layout */
   border-left: 4px solid #4f46e5;
 }
 
@@ -141,10 +184,23 @@
 .polyglot-original-text .text {
   font-weight: 500;
   color: #374151;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  hyphens: auto;
 }
 
 .polyglot-translation-section {
-  margin-bottom: 20px;
+  margin-bottom: 0; /* Remove margin in side-by-side layout */
+}
+
+.polyglot-translation-text {
+  font-size: 16px;
+  font-weight: 500;
+  color: #0f172a;
+  margin-bottom: 8px;
+  word-wrap: break-word;
+  overflow-wrap: break-word;
+  hyphens: auto;
 }
 
 .polyglot-section-title {
@@ -196,6 +252,15 @@
   border-radius: 8px;
   padding: 16px;
   margin-top: 12px;
+  width: 100%; /* Ensure it spans full width */
+  box-sizing: border-box;
+}
+
+/* Ensure learning content spans full width in side-by-side layout */
+.polyglot-learning-content,
+.polyglot-examples,
+.polyglot-action-buttons {
+  grid-column: 1 / -1; /* Span full width when in grid */
 }
 
 .polyglot-grammar-analysis,
@@ -360,4 +425,131 @@
     color: #f9fafb;
     border-color: #4b5563;
   }
+}
+
+/* Enhanced Vocabulary Analysis Styling */
+.polyglot-vocabulary-analysis {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+  line-height: 1.6;
+  color: #1f2937;
+}
+
+.polyglot-vocabulary-analysis h3,
+.polyglot-vocabulary-analysis h4 {
+  color: #059669;
+  margin: 16px 0 8px 0;
+  font-weight: 600;
+}
+
+.polyglot-vocabulary-analysis h3 {
+  font-size: 16px;
+  border-bottom: 2px solid #d1fae5;
+  padding-bottom: 4px;
+}
+
+.polyglot-vocabulary-analysis h4 {
+  font-size: 14px;
+  color: #0d9488;
+}
+
+.polyglot-vocabulary-analysis ul {
+  margin: 8px 0;
+  padding-left: 20px;
+}
+
+.polyglot-vocabulary-analysis li {
+  margin: 6px 0;
+  list-style-type: none;
+  position: relative;
+}
+
+.polyglot-vocabulary-analysis li::before {
+  content: "▸";
+  color: #10b981;
+  font-weight: bold;
+  position: absolute;
+  left: -16px;
+}
+
+.polyglot-vocabulary-analysis strong {
+  color: #065f46;
+  font-weight: 600;
+}
+
+.polyglot-vocabulary-analysis em {
+  color: #6b7280;
+  font-style: italic;
+}
+
+.polyglot-vocabulary-analysis p {
+  margin: 8px 0;
+}
+
+/* Word analysis cards */
+.polyglot-vocabulary-analysis .word-card {
+  background: #f0fdfa;
+  border: 1px solid #a7f3d0;
+  border-radius: 8px;
+  padding: 12px;
+  margin: 8px 0;
+  border-left: 4px solid #10b981;
+}
+
+.polyglot-vocabulary-analysis .word-card .word-title {
+  font-weight: 600;
+  color: #047857;
+  font-size: 15px;
+  margin-bottom: 4px;
+}
+
+.polyglot-vocabulary-analysis .difficulty-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 12px;
+  font-size: 11px;
+  font-weight: 500;
+  margin-left: 8px;
+}
+
+.polyglot-vocabulary-analysis .difficulty-beginner {
+  background: #d1fae5;
+  color: #047857;
+}
+
+.polyglot-vocabulary-analysis .difficulty-intermediate {
+  background: #fef3c7;
+  color: #d97706;
+}
+
+.polyglot-vocabulary-analysis .difficulty-advanced {
+  background: #fee2e2;
+  color: #dc2626;
+}
+
+/* Example sentences styling */
+.polyglot-vocabulary-analysis .example-sentence {
+  background: #fffbeb;
+  border: 1px solid #fed7aa;
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin: 4px 0;
+  font-style: italic;
+  color: #92400e;
+  border-left: 3px solid #f59e0b;
+}
+
+/* Learning tips styling */
+.polyglot-vocabulary-analysis .learning-tip {
+  background: #eff6ff;
+  border: 1px solid #bfdbfe;
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin: 4px 0;
+  color: #1e40af;
+  border-left: 3px solid #3b82f6;
+}
+
+.polyglot-vocabulary-analysis .learning-tip::before {
+  content: "💡 ";
+  margin-right: 4px;
 }
