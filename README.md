@@ -4,19 +4,19 @@ A professional language learning Chrome extension that leverages all available C
 
 ## Features
 
-### 🌟 Core Features
+### Core Features
 
 - **Smart Text Translation**: Highlight any text and get instant, context-aware translations
 - **AI-Powered Language Detection**: Automatically detects the source language
 - **Multiple Learning Modes**:
-  - Vocabulary enhancement with definitions and examples
-  - Grammar analysis and corrections
-  - Verb conjugation and tense analysis
-  - General translation
+  - Translate: Clean, simple translation without additional content
+  - Vocabulary: Enhanced analysis with definitions and examples
+  - Grammar: Detailed analysis and corrections
+  - Verbs: Conjugation and tense analysis
 - **Professional Tooltip Interface**: Clean, responsive design that works on any website
 - **12 Supported Languages**: English, Spanish, French, German, Italian, Portuguese, Russian, Chinese, Japanese, Korean, Arabic, Hindi
 
-### 🤖 Chrome AI Integration
+### Chrome AI Integration
 
 - **Language Model API**: For advanced prompting and contextual analysis
 - **Translator API**: For high-quality text translation
@@ -53,10 +53,10 @@ A professional language learning Chrome extension that leverages all available C
 
 ### Learning Modes
 
+- **Translate**: Clean, simple translation without additional learning content
 - **Vocabulary**: Get detailed word definitions, synonyms, and usage examples
 - **Grammar**: Analyze grammatical structures and get correction suggestions
 - **Verbs**: Learn about verb tenses, conjugations, and irregular forms
-- **General**: Basic translation without additional learning content
 
 ## Files Structure
 
