@@ -1,0 +1,363 @@
+/* Professional tooltip styles for PolyglotReader */
+.polyglot-tooltip {
+  position: absolute;
+  z-index: 999999;
+  background: white;
+  border-radius: 12px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15), 0 0 0 1px rgba(0, 0, 0, 0.05);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  color: #374151;
+  max-width: 400px;
+  min-width: 300px;
+  opacity: 0;
+  transform: translateY(10px) scale(0.95);
+  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  pointer-events: none;
+  backdrop-filter: blur(10px);
+}
+
+.polyglot-tooltip.visible {
+  opacity: 1;
+  transform: translateY(0) scale(1);
+  pointer-events: auto;
+}
+
+.polyglot-tooltip-arrow {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  background: white;
+  border: 1px solid rgba(0, 0, 0, 0.05);
+  transform: rotate(45deg);
+  border-radius: 2px;
+}
+
+.polyglot-tooltip-arrow.top {
+  top: -6px;
+  left: 20px;
+  border-bottom: none;
+  border-right: none;
+}
+
+.polyglot-tooltip-arrow.bottom {
+  bottom: -6px;
+  left: 20px;
+  border-top: none;
+  border-left: none;
+}
+
+.polyglot-tooltip-header {
+  padding: 16px 20px 12px;
+  border-bottom: 1px solid #f3f4f6;
+  background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+  border-radius: 12px 12px 0 0;
+}
+
+.polyglot-tooltip-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.polyglot-tooltip-logo {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  color: #4f46e5;
+  font-size: 16px;
+}
+
+.polyglot-tooltip-close {
+  background: none;
+  border: none;
+  font-size: 18px;
+  color: #9ca3af;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  transition: all 0.2s ease;
+}
+
+.polyglot-tooltip-close:hover {
+  background: #f3f4f6;
+  color: #374151;
+}
+
+.polyglot-tooltip-controls {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
+.polyglot-select {
+  padding: 6px 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  font-size: 12px;
+  background: white;
+  color: #374151;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  min-width: 100px;
+}
+
+.polyglot-select:focus {
+  outline: none;
+  border-color: #4f46e5;
+  box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.1);
+}
+
+.polyglot-select:hover {
+  border-color: #9ca3af;
+}
+
+.polyglot-tooltip-content {
+  padding: 20px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.polyglot-original-text {
+  background: #f8fafc;
+  padding: 12px 16px;
+  border-radius: 8px;
+  margin-bottom: 16px;
+  border-left: 4px solid #4f46e5;
+}
+
+.polyglot-original-text .label {
+  font-size: 11px;
+  font-weight: 600;
+  color: #6b7280;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 4px;
+}
+
+.polyglot-original-text .text {
+  font-weight: 500;
+  color: #374151;
+}
+
+.polyglot-translation-section {
+  margin-bottom: 20px;
+}
+
+.polyglot-section-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: #4f46e5;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.polyglot-translation {
+  background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+  padding: 16px;
+  border-radius: 8px;
+  border: 1px solid #e0f2fe;
+  margin-bottom: 12px;
+}
+
+.polyglot-translation-text {
+  font-size: 16px;
+  font-weight: 500;
+  color: #0f172a;
+  margin-bottom: 8px;
+}
+
+.polyglot-pronunciation {
+  font-style: italic;
+  color: #64748b;
+  font-size: 13px;
+  margin-bottom: 4px;
+}
+
+.polyglot-language-info {
+  font-size: 11px;
+  color: #64748b;
+  background: rgba(255, 255, 255, 0.7);
+  padding: 4px 8px;
+  border-radius: 4px;
+  display: inline-block;
+}
+
+.polyglot-learning-content {
+  background: #fefce8;
+  border: 1px solid #fde047;
+  border-radius: 8px;
+  padding: 16px;
+  margin-top: 12px;
+}
+
+.polyglot-grammar-analysis,
+.polyglot-vocabulary-help,
+.polyglot-verb-analysis {
+  font-size: 13px;
+  line-height: 1.6;
+  color: #374151;
+}
+
+.polyglot-examples {
+  margin-top: 12px;
+}
+
+.polyglot-example {
+  background: #f1f5f9;
+  padding: 8px 12px;
+  border-radius: 6px;
+  margin-bottom: 6px;
+  font-size: 12px;
+  border-left: 3px solid #94a3b8;
+}
+
+.polyglot-example:last-child {
+  margin-bottom: 0;
+}
+
+.polyglot-loading {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  color: #6b7280;
+}
+
+.polyglot-spinner {
+  display: inline-block;
+  width: 20px;
+  height: 20px;
+  border: 2px solid #e5e7eb;
+  border-radius: 50%;
+  border-top-color: #4f46e5;
+  animation: spin 1s ease-in-out infinite;
+  margin-right: 8px;
+}
+
+.polyglot-error {
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  color: #991b1b;
+  padding: 12px 16px;
+  border-radius: 8px;
+  font-size: 13px;
+  text-align: center;
+}
+
+.polyglot-action-buttons {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid #f3f4f6;
+}
+
+.polyglot-button {
+  flex: 1;
+  padding: 8px 12px;
+  border: 1px solid #d1d5db;
+  border-radius: 6px;
+  background: white;
+  color: #374151;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  text-align: center;
+}
+
+.polyglot-button:hover {
+  background: #f9fafb;
+  border-color: #9ca3af;
+}
+
+.polyglot-button.primary {
+  background: #4f46e5;
+  color: white;
+  border-color: #4f46e5;
+}
+
+.polyglot-button.primary:hover {
+  background: #4338ca;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.polyglot-fade-in {
+  animation: fadeIn 0.3s ease-out;
+}
+
+/* Responsive design */
+@media (max-width: 500px) {
+  .polyglot-tooltip {
+    max-width: 90vw;
+    min-width: 280px;
+  }
+  
+  .polyglot-tooltip-controls {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+  }
+  
+  .polyglot-action-buttons {
+    flex-direction: column;
+  }
+}
+
+/* High contrast mode support */
+@media (prefers-contrast: high) {
+  .polyglot-tooltip {
+    border: 2px solid #000;
+    box-shadow: 0 4px 8px rgba(0, 0, 0, 0.3);
+  }
+  
+  .polyglot-translation {
+    border: 2px solid #0f172a;
+  }
+}
+
+/* Dark mode support (if system prefers dark) */
+@media (prefers-color-scheme: dark) {
+  .polyglot-tooltip {
+    background: #1f2937;
+    color: #f9fafb;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.1);
+  }
+  
+  .polyglot-tooltip-header {
+    background: linear-gradient(135deg, #374151 0%, #4b5563 100%);
+    border-bottom-color: #374151;
+  }
+  
+  .polyglot-original-text {
+    background: #374151;
+    color: #f9fafb;
+  }
+  
+  .polyglot-translation {
+    background: linear-gradient(135deg, #1e40af 0%, #1d4ed8 100%);
+    border-color: #1e40af;
+  }
+  
+  .polyglot-select {
+    background: #374151;
+    color: #f9fafb;
+    border-color: #4b5563;
+  }
+}

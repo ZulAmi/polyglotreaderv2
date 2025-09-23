@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PolyglotReader - Enhanced Test Page</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 900px;
+            margin: 0 auto;
+            padding: 40px 20px;
+            line-height: 1.6;
+            color: #333;
+            background: #f8fafc;
+        }
+        .header {
+            text-align: center;
+            margin-bottom: 40px;
+            padding: 30px;
+            background: linear-gradient(135deg, #4F46E5 0%, #7C3AED 100%);
+            color: white;
+            border-radius: 16px;
+            box-shadow: 0 10px 30px rgba(79, 70, 229, 0.3);
+        }
+        .api-status {
+            background: #e0f2fe;
+            border: 2px solid #0288d1;
+            border-radius: 12px;
+            padding: 20px;
+            margin: 20px 0;
+        }
+        .test-section {
+            margin: 30px 0;
+            padding: 25px;
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0, 0, 0, 0.1);
+        }
+        .highlight-text {
+            background: linear-gradient(120deg, #fef3c7 0%, #fcd34d 100%);
+            padding: 8px 12px;
+            border-radius: 6px;
+            font-weight: 500;
+            border: 2px dashed #f59e0b;
+            display: inline-block;
+            margin: 4px;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+        .highlight-text:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);
+        }
+        .test-instructions {
+            background: #f0f9ff;
+            border-left: 4px solid #0ea5e9;
+            padding: 20px;
+            border-radius: 8px;
+            margin: 20px 0;
+        }
+        .language-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 20px;
+            margin: 30px 0;
+        }
+        .language-sample {
+            background: white;
+            padding: 20px;
+            border-radius: 12px;
+            border: 2px solid #e2e8f0;
+            transition: all 0.2s ease;
+        }
+        .language-sample:hover {
+            border-color: #4F46E5;
+            transform: translateY(-2px);
+            box-shadow: 0 8px 25px rgba(0, 0, 0, 0.1);
+        }
+        .lang-flag {
+            font-size: 24px;
+            margin-right: 10px;
+        }
+        .lang-text {
+            font-size: 16px;
+            font-weight: 500;
+            color: #1e293b;
+            margin: 10px 0;
+        }
+        .lang-translation {
+            font-size: 14px;
+            color: #64748b;
+            font-style: italic;
+        }
+        .debug-info {
+            background: #1e293b;
+            color: #e2e8f0;
+            padding: 20px;
+            border-radius: 8px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            margin: 20px 0;
+            overflow-x: auto;
+        }
+        .status-indicator {
+            display: inline-block;
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            margin-right: 8px;
+        }
+        .status-green { background: #10b981; }
+        .status-red { background: #ef4444; }
+        .status-yellow { background: #f59e0b; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🌍 PolyglotReader AI Extension</h1>
+        <p>Advanced Language Learning with Chrome AI APIs</p>
+        <div style="margin-top: 15px; font-size: 14px; opacity: 0.9;">
+            Select any text below to test the AI-powered translation and learning features
+        </div>
+    </div>
+
+    <div class="api-status">
+        <h3>🤖 Chrome AI API Status</h3>
+        <p>Check your browser console (F12) to see which AI APIs are available.</p>
+        <div id="apiStatusList">
+            <div><span class="status-indicator status-yellow"></span> Language Model: Checking...</div>
+            <div><span class="status-indicator status-yellow"></span> Translator: Checking...</div>
+            <div><span class="status-indicator status-yellow"></span> Other APIs: Checking...</div>
+        </div>
+    </div>
+
+    <div class="test-instructions">
+        <h3>📖 How to Test:</h3>
+        <ol>
+            <li><strong>Install Extension:</strong> Load the PolyglotReader extension in Chrome</li>
+            <li><strong>Select Text:</strong> Highlight any colored text below</li>
+            <li><strong>View Tooltip:</strong> Professional tooltip should appear with AI features</li>
+            <li><strong>Try Learning Modes:</strong> Switch between Vocabulary, Grammar, and Verbs</li>
+            <li><strong>Check Console:</strong> Open Developer Tools (F12) to see AI API status</li>
+        </ol>
+    </div>
+
+    <div class="test-section">
+        <h2>🎯 Quick Test Phrases</h2>
+        <p>Click and drag to select these pre-formatted test phrases:</p>
+        <div style="margin: 20px 0;">
+            <span class="highlight-text">Hello world</span>
+            <span class="highlight-text">How are you today?</span>
+            <span class="highlight-text">I love learning languages</span>
+            <span class="highlight-text">The weather is beautiful</span>
+            <span class="highlight-text">Thank you very much</span>
+        </div>
+    </div>
+
+    <div class="test-section">
+        <h2>📚 Grammar Analysis Tests</h2>
+        <p>Select these sentences to test grammar analysis:</p>
+        <div style="margin: 20px 0;">
+            <div class="highlight-text" style="display: block; margin: 10px 0;">
+                "I have been studying French for three years."
+            </div>
+            <div class="highlight-text" style="display: block; margin: 10px 0;">
+                "She was reading when the phone rang."
+            </div>
+            <div class="highlight-text" style="display: block; margin: 10px 0;">
+                "If I were you, I would learn Spanish."
+            </div>
+        </div>
+    </div>
+
+    <div class="language-grid">
+        <div class="language-sample">
+            <div><span class="lang-flag">🇫🇷</span><strong>French</strong></div>
+            <div class="lang-text">Bonjour, comment allez-vous?</div>
+            <div class="lang-translation">Hello, how are you?</div>
+        </div>
+
+        <div class="language-sample">
+            <div><span class="lang-flag">🇪🇸</span><strong>Spanish</strong></div>
+            <div class="lang-text">¿Dónde está la biblioteca?</div>
+            <div class="lang-translation">Where is the library?</div>
+        </div>
+
+        <div class="language-sample">
+            <div><span class="lang-flag">🇩🇪</span><strong>German</strong></div>
+            <div class="lang-text">Ich möchte ein Bier, bitte.</div>
+            <div class="lang-translation">I would like a beer, please.</div>
+        </div>
+
+        <div class="language-sample">
+            <div><span class="lang-flag">🇮🇹</span><strong>Italian</strong></div>
+            <div class="lang-text">Dove posso trovare un buon ristorante?</div>
+            <div class="lang-translation">Where can I find a good restaurant?</div>
+        </div>
+
+        <div class="language-sample">
+            <div><span class="lang-flag">🇯🇵</span><strong>Japanese</strong></div>
+            <div class="lang-text">私は日本語を勉強しています。</div>
+            <div class="lang-translation">I am studying Japanese.</div>
+        </div>
+
+        <div class="language-sample">
+            <div><span class="lang-flag">🇰🇷</span><strong>Korean</strong></div>
+            <div class="lang-text">안녕하세요, 만나서 반갑습니다.</div>
+            <div class="lang-translation">Hello, nice to meet you.</div>
+        </div>
+    </div>
+
+    <div class="test-section">
+        <h2>🔬 Advanced Vocabulary Tests</h2>
+        <p>Test vocabulary analysis with these complex words:</p>
+        <div style="margin: 20px 0;">
+            <span class="highlight-text">serendipitous</span>
+            <span class="highlight-text">ubiquitous</span>
+            <span class="highlight-text">metamorphosis</span>
+            <span class="highlight-text">perspicacious</span>
+            <span class="highlight-text">quintessential</span>
+        </div>
+    </div>
+
+    <div class="test-section">
+        <h2>🔄 Verb Conjugation Tests</h2>
+        <p>Test verb analysis with various tenses:</p>
+        <div style="margin: 20px 0;">
+            <div class="highlight-text" style="display: block; margin: 10px 0;">
+                "I am running to the store."
+            </div>
+            <div class="highlight-text" style="display: block; margin: 10px 0;">
+                "She has been working all day."
+            </div>
+            <div class="highlight-text" style="display: block; margin: 10px 0;">
+                "They will have finished by tomorrow."
+            </div>
+        </div>
+    </div>
+
+    <div class="debug-info">
+        <h3>🔧 Debug Information</h3>
+        <div id="debugOutput">
+            Extension loading... Check console for detailed logs.
+        </div>
+    </div>
+
+    <script>
+        // Add some interactivity to help with testing
+        document.addEventListener('DOMContentLoaded', function() {
+            console.log('🧪 PolyglotReader Test Page Loaded');
+            console.log('📋 Instructions:');
+            console.log('1. Make sure the PolyglotReader extension is installed');
+            console.log('2. Select any text on this page');
+            console.log('3. Look for the tooltip to appear');
+            console.log('4. Check the console for AI API status messages');
+            
+            // Update debug output
+            const debugOutput = document.getElementById('debugOutput');
+            debugOutput.innerHTML = `
+                Page loaded at: ${new Date().toLocaleTimeString()}<br>
+                User Agent: ${navigator.userAgent.includes('Chrome') ? '✅ Chrome detected' : '❌ Not Chrome'}<br>
+                Extension Status: ${typeof chrome !== 'undefined' ? '✅ Chrome APIs available' : '❌ No Chrome APIs'}<br>
+                <br>
+                💡 Select text above to test the extension!
+            `;
+            
+            // Add click handlers to highlight elements for easy testing
+            document.querySelectorAll('.highlight-text').forEach(element => {
+                element.addEventListener('click', function() {
+                    // Select the text
+                    const range = document.createRange();
+                    range.selectNodeContents(this);
+                    const selection = window.getSelection();
+                    selection.removeAllRanges();
+                    selection.addRange(range);
+                    
+                    console.log(`🎯 Selected text: "${this.textContent}"`);
+                });
+            });
+        });
+
+        // Listen for messages from the extension
+        window.addEventListener('message', function(event) {
+            if (event.data && event.data.type === 'POLYGLOT_STATUS') {
+                console.log('📨 Extension status update:', event.data);
+            }
+        });
+    </script>
+
+    <footer style="text-align: center; margin-top: 60px; padding: 30px; color: #64748b; border-top: 1px solid #e2e8f0;">
+        <h3>🚀 PolyglotReader Extension Test Environment</h3>
+        <p>Built with Chrome AI APIs • Select any text to test • Check console for logs</p>
+        <div style="margin-top: 15px; font-size: 12px;">
+            <div>✅ Text Selection Detection</div>
+            <div>✅ Professional Tooltip UI</div>
+            <div>✅ Multiple Learning Modes</div>
+            <div>✅ AI-Powered Translation</div>
+        </div>
+    </footer>
+</body>
+</html>
