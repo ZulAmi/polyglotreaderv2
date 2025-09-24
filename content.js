@@ -11,8 +11,8 @@ class PolyglotReader {
       // Vocabulary performance/quality strategy
       // 'adaptive' -> compact JSON for long text, full for short
       // 'full'     -> always full detailed prompt
-      // 'fast'     -> always compact JSON prompt
-      vocabStrategy: 'adaptive',
+  // 'fast'     -> always compact JSON prompt
+  vocabStrategy: 'adaptive',
       maxVocabularyChars: 400,
       vocabMaxItems: 12
     };
@@ -22,6 +22,19 @@ class PolyglotReader {
     // Track in-flight processing to avoid race conditions when user changes focus/language
     this.requestCounter = 0;     // Monotonically increasing id
     this.activeRequestId = 0;    // The latest request id; only this one may update the UI
+    // Debounce handle for reprocessing when dropdowns change
+    this.reprocessTimer = null;
+    // Simple in-memory cache for learning content (LRU-ish)
+    this.learningCache = new Map();
+    this.learningCacheOrder = [];
+  // Track last processed selection to avoid duplicate processing from rapid events
+  this.lastSelectionKey = '';
+  this.lastSelectionAt = 0;
+  // Track in-flight learning content computations to dedupe concurrent requests
+  this.inFlightLearning = new Map();
+  // Persistent vocabulary list and current selection vocabulary
+  this.vocabularyList = [];
+  this.lastVocabItems = [];
     
     this.init();
   }
@@ -31,6 +44,7 @@ class PolyglotReader {
     console.log('🔍 Checking Chrome AI API availability...');
     this.checkAIAvailability();
     await this.initializeAIAPIs();
+    await this.loadVocabList();
     this.createTooltip();
     this.bindEvents();
     console.log('✅ PolyglotReader initialized');
@@ -454,6 +468,11 @@ class PolyglotReader {
             <option value="grammar">Grammar</option>
             <option value="verbs">Verbs</option>
           </select>
+          <select class="polyglot-select" id="polyglot-vocab-detail" style="display:none">
+            <option value="fast">Fast</option>
+            <option value="full">Detailed</option>
+            <option value="adaptive">Adaptive</option>
+          </select>
         </div>
       </div>
       <div class="polyglot-tooltip-content">
@@ -506,8 +525,9 @@ class PolyglotReader {
       closeBtn.addEventListener('click', () => this.hideTooltip());
     }
 
-    const targetLanguageSelect = this.tooltip.querySelector('#polyglot-target-language');
-    const learningFocusSelect = this.tooltip.querySelector('#polyglot-learning-focus');
+  const targetLanguageSelect = this.tooltip.querySelector('#polyglot-target-language');
+  const learningFocusSelect = this.tooltip.querySelector('#polyglot-learning-focus');
+  const vocabDetailSelect = this.tooltip.querySelector('#polyglot-vocab-detail');
 
     if (targetLanguageSelect) {
       targetLanguageSelect.addEventListener('change', () => {
@@ -515,7 +535,7 @@ class PolyglotReader {
         // Only reprocess if user has selected text and made a conscious change
         if (this.selectedText && this.isTooltipVisible) {
           console.log('🔄 Reprocessing text with new target language...');
-          this.processText(this.selectedText);
+          this.scheduleReprocessSelectedText();
         }
       });
       
@@ -533,7 +553,11 @@ class PolyglotReader {
         // Only reprocess if user has selected text and made a conscious change
         if (this.selectedText && this.isTooltipVisible) {
           console.log('🔄 Reprocessing text with new learning focus...');
-          this.processText(this.selectedText);
+          this.scheduleReprocessSelectedText();
+        }
+        // Toggle vocab detail selector visibility
+        if (vocabDetailSelect) {
+          vocabDetailSelect.style.display = (learningFocusSelect.value === 'vocabulary') ? '' : 'none';
         }
       });
       
@@ -546,11 +570,38 @@ class PolyglotReader {
     }
     
     // Additional verification
+    if (vocabDetailSelect) {
+      // Initialize selector with current strategy
+      vocabDetailSelect.value = this.settings.vocabStrategy || 'adaptive';
+      // Show/hide based on current focus
+      const currentFocus = learningFocusSelect?.value || this.settings.learningFocus || 'translate';
+      vocabDetailSelect.style.display = (currentFocus === 'vocabulary') ? '' : 'none';
+      vocabDetailSelect.addEventListener('change', () => {
+        const val = vocabDetailSelect.value;
+        console.log('🧠 Vocab detail strategy changed to:', val);
+        this.settings.vocabStrategy = val;
+        if (this.selectedText && this.isTooltipVisible && currentFocus === 'vocabulary') {
+          this.scheduleReprocessSelectedText();
+        }
+      });
+    }
+
     console.log('Tooltip event binding complete. Elements found:', {
       closeBtn: !!closeBtn,
       targetLanguageSelect: !!targetLanguageSelect,
-      learningFocusSelect: !!learningFocusSelect
+      learningFocusSelect: !!learningFocusSelect,
+      vocabDetailSelect: !!vocabDetailSelect
     });
+  }
+
+  // Debounce reprocessing to coalesce rapid dropdown changes into one request
+  scheduleReprocessSelectedText(delayMs = 250) {
+    if (!this.selectedText || !this.isTooltipVisible) return;
+    if (this.reprocessTimer) clearTimeout(this.reprocessTimer);
+    this.reprocessTimer = setTimeout(() => {
+      this.reprocessTimer = null;
+      this.processText(this.selectedText);
+    }, delayMs);
   }
 
   async handleTextSelection(e) {
@@ -628,6 +679,18 @@ class PolyglotReader {
     this.tooltip.classList.add('visible');
     this.isTooltipVisible = true;
     
+    // Avoid duplicate processing if same text/focus/target just processed very recently
+    const targetLanguageSelect = this.tooltip.querySelector('#polyglot-target-language');
+    const learningFocusSelect = this.tooltip.querySelector('#polyglot-learning-focus');
+    const key = `${text}|${targetLanguageSelect?.value || ''}|${learningFocusSelect?.value || ''}`;
+    const now = Date.now();
+    if (this.isTooltipVisible && this.lastSelectionKey === key && (now - this.lastSelectionAt) < 600) {
+      console.log('⏳ Skipping duplicate processing for recent identical selection');
+      return;
+    }
+    this.lastSelectionKey = key;
+    this.lastSelectionAt = now;
+
     // Process the selected text
     this.processText(text);
   }
@@ -641,12 +704,17 @@ class PolyglotReader {
   updateTooltipSettings() {
     const targetLanguageSelect = this.tooltip.querySelector('#polyglot-target-language');
     const learningFocusSelect = this.tooltip.querySelector('#polyglot-learning-focus');
+    const vocabDetailSelect = this.tooltip.querySelector('#polyglot-vocab-detail');
     
     if (targetLanguageSelect) {
       targetLanguageSelect.value = this.settings.defaultLanguage;
     }
     if (learningFocusSelect) {
       learningFocusSelect.value = this.settings.learningFocus;
+    }
+    if (vocabDetailSelect) {
+      vocabDetailSelect.value = this.settings.vocabStrategy || 'adaptive';
+      vocabDetailSelect.style.display = (learningFocusSelect?.value === 'vocabulary') ? '' : 'none';
     }
   }
 
@@ -1002,17 +1070,28 @@ class PolyglotReader {
             const isLong = text.length > (this.settings.maxVocabularyChars || 400);
             const useCompact = (strategy === 'fast') || (strategy === 'adaptive' && isLong);
             usedCompact = useCompact;
+            // Cache key incorporates mode, language, strategy, and text
+            const cacheKey = `${focus}|${targetLang}|${useCompact ? 'compact' : 'full'}|${text}`;
+            if (this.learningCache.has(cacheKey)) {
+              console.log('🗃️ Cache hit for learning content');
+              const cached = this.learningCache.get(cacheKey);
+              if (cached && typeof cached === 'object' && cached.html) {
+                this.lastVocabItems = Array.isArray(cached.items) ? cached.items : [];
+                return cached.html;
+              }
+              return cached;
+            }
+            if (this.inFlightLearning.has(cacheKey)) {
+              console.log('🛫 Awaiting in-flight vocabulary analysis');
+              try { return await this.inFlightLearning.get(cacheKey); } catch (e) { /* fallthrough */ }
+            }
             
             if (useCompact) {
               const sample = isLong ? text.slice(0, this.settings.maxVocabularyChars) : text;
               const maxItems = this.settings.vocabMaxItems || 12;
               // Compact JSON-only prompt. Output will be parsed/pretty-printed locally.
-              prompt = `Extract key vocabulary from the passage.
-Return ONLY a valid JSON array (no preface or trailing text) with up to ${maxItems} items.
-Each item must be: {"word":"...", "pos":"noun|verb|adj|adv|other", "def":"<=16 words", "example":"<=12 words"}.
-
-Text:
-"""${sample}"""`;
+              prompt = `Return ONLY a JSON array (no extra text) of up to ${maxItems} items with keys word,pos,def,example.
+Text: """${sample}"""`;
             } else {
               // Full, detailed prompt
               prompt = `Analyze the vocabulary in: "${text}"
@@ -1136,35 +1215,101 @@ Format as clear sections with emojis. Respond in ${targetLang}.`;
       if (prompt && this.aiApis.languageModel) {
         console.log(`🚀 Executing ${focus} prompt with Language Model...`);
         try {
-          const result = await this.aiApis.languageModel.prompt(prompt, {
-            language: langCode
-          });
-          console.log(`✅ ${focus} analysis completed successfully, length: ${result.length}`);
-          
-          // Format vocabulary analysis for better display
+          // For vocabulary, dedupe concurrent executions using inFlightLearning
           if (focus === 'vocabulary') {
-            if (usedCompact) {
-              const html = this.tryFormatVocabJSON(result);
-              if (html) return html;
+            const cacheKey = `${focus}|${targetLang}|${usedCompact ? 'compact' : 'full'}|${text}`;
+            const execPromise = (async () => {
+              const result = await this.aiApis.languageModel.prompt(prompt, { language: langCode });
+              console.log(`✅ ${focus} analysis completed successfully, length: ${result.length}`);
+              if (usedCompact) {
+                const parsed = this.parseVocabJSONToItems(result);
+                if (parsed && Array.isArray(parsed.items)) {
+                  const html = this.renderVocabItems(parsed.items);
+                  this.lastVocabItems = parsed.items;
+                  this.learningCache.set(cacheKey, { html, items: parsed.items });
+                  this.learningCacheOrder.push(cacheKey);
+                  if (this.learningCacheOrder.length > 30) {
+                    const oldest = this.learningCacheOrder.shift();
+                    if (oldest) this.learningCache.delete(oldest);
+                  }
+                  return html;
+                }
+              }
+              // Try to extract from detailed text and render rich cards + formatted analysis
+              const items = this.parseVocabFromAnalysisText(result);
+              this.lastVocabItems = items;
+              const formatted = this.formatVocabularyAnalysis(result);
+              const cards = (items && items.length) ? this.renderVocabItems(items) : '';
+              const combined = cards ? `${cards}<hr>${formatted}` : formatted;
+              this.learningCache.set(cacheKey, { html: combined, items });
+              this.learningCacheOrder.push(cacheKey);
+              if (this.learningCacheOrder.length > 30) {
+                const oldest = this.learningCacheOrder.shift();
+                if (oldest) this.learningCache.delete(oldest);
+              }
+              return combined;
+            })();
+            this.inFlightLearning.set(cacheKey, execPromise);
+            try {
+              const out = await execPromise;
+              return out;
+            } finally {
+              this.inFlightLearning.delete(cacheKey);
             }
-            return this.formatVocabularyAnalysis(result);
           }
-          
+
+          // Non-vocabulary path (no dedupe needed)
+          const result = await this.aiApis.languageModel.prompt(prompt, { language: langCode });
+          console.log(`✅ ${focus} analysis completed successfully, length: ${result.length}`);
           return result;
         } catch (error) {
             console.error(`❌ Language model prompt failed for ${focus}:`, error);
             // Retry with safe default language to satisfy output language requirement
             try {
               console.log(`🔄 Retrying ${focus} prompt with English language...`);
+              // For vocabulary, also dedupe the fallback execution
+              if (focus === 'vocabulary') {
+                const cacheKey = `${focus}|${targetLang}|${usedCompact ? 'compact' : 'full'}|${text}`;
+                const execPromise = (async () => {
+                  const result = await this.aiApis.languageModel.prompt(prompt, { language: 'en' });
+                  console.log(`✅ ${focus} analysis completed with fallback, length: ${result.length}`);
+                  if (usedCompact) {
+                    const parsed = this.parseVocabJSONToItems(result);
+                    if (parsed && Array.isArray(parsed.items)) {
+                      const html = this.renderVocabItems(parsed.items);
+                      this.lastVocabItems = parsed.items;
+                      this.learningCache.set(cacheKey, { html, items: parsed.items });
+                      this.learningCacheOrder.push(cacheKey);
+                      if (this.learningCacheOrder.length > 30) {
+                        const oldest = this.learningCacheOrder.shift();
+                        if (oldest) this.learningCache.delete(oldest);
+                      }
+                      return html;
+                    }
+                  }
+                  const items = this.parseVocabFromAnalysisText(result);
+                  this.lastVocabItems = items;
+                  const formatted = this.formatVocabularyAnalysis(result);
+                  const cards = (items && items.length) ? this.renderVocabItems(items) : '';
+                  const combined = cards ? `${cards}<hr>${formatted}` : formatted;
+                  this.learningCache.set(cacheKey, { html: combined, items });
+                  this.learningCacheOrder.push(cacheKey);
+                  if (this.learningCacheOrder.length > 30) {
+                    const oldest = this.learningCacheOrder.shift();
+                    if (oldest) this.learningCache.delete(oldest);
+                  }
+                  return combined;
+                })();
+                this.inFlightLearning.set(cacheKey, execPromise);
+                try {
+                  const out = await execPromise;
+                  return out;
+                } finally {
+                  this.inFlightLearning.delete(cacheKey);
+                }
+              }
               const result = await this.aiApis.languageModel.prompt(prompt, { language: 'en' });
               console.log(`✅ ${focus} analysis completed with fallback, length: ${result.length}`);
-              if (focus === 'vocabulary') {
-                if (usedCompact) {
-                  const html = this.tryFormatVocabJSON(result);
-                  if (html) return html;
-                }
-                return this.formatVocabularyAnalysis(result);
-              }
               return result;
             } catch (retryError) {
               console.error(`❌ ${focus} prompt failed even with fallback:`, retryError);
@@ -1185,13 +1330,18 @@ Format as clear sections with emojis. Respond in ${targetLang}.`;
     // Enhanced formatting for vocabulary analysis
     let formatted = rawAnalysis;
     
+    // Convert markdown headers (##, ###) to HTML
+    formatted = formatted.replace(/^###\s+(.+)$/gm, '<h4>$1</h4>');
+    formatted = formatted.replace(/^##\s+(.+)$/gm, '<h3>$1</h3>');
+
     // Convert markdown-style headers to HTML
     formatted = formatted.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
     formatted = formatted.replace(/^\*\*([^:]+):\*\*/gm, '<h3>$1</h3>');
     
-    // Format bullet points
-    formatted = formatted.replace(/^- (.*)/gm, '<li>$1</li>');
-    formatted = formatted.replace(/(<li>.*<\/li>)/gs, '<ul>$1</ul>');
+    // Format bullet points (line-by-line to avoid over-wrapping)
+    formatted = formatted.replace(/^-\s+(.*)$/gm, '<li>$1</li>');
+    // Wrap consecutive <li> blocks with <ul> using a simple pass
+    formatted = formatted.replace(/(?:<li>.*<\/li>\n?)+/g, (block) => `<ul>${block}</ul>`);
     
     // Format word entries (Word: Definition pattern)
     formatted = formatted.replace(/- Word: ([^,\n]+)/g, '<div class="word-card"><div class="word-title">$1</div>');
@@ -1214,28 +1364,164 @@ Format as clear sections with emojis. Respond in ${targetLang}.`;
 
   // Parse compact JSON vocabulary output and render quick HTML
   tryFormatVocabJSON(result) {
+    // Deprecated by parseVocabJSONToItems + renderVocabItems; kept for backward compatibility
+    const parsed = this.parseVocabJSONToItems(result);
+    if (parsed && Array.isArray(parsed.items)) {
+      return this.renderVocabItems(parsed.items);
+    }
+    return null;
+  }
+
+  // Extract structured items from compact JSON output
+  parseVocabJSONToItems(result) {
     try {
       const clean = String(result || '').trim().replace(/^```json\s*|^```|```$/g, '').trim();
       const data = JSON.parse(clean);
       if (!Array.isArray(data)) return null;
       const limit = this.settings.vocabMaxItems || 12;
-      const items = data.slice(0, limit);
-      const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
-      return `
-        <div class="polyglot-vocabulary-analysis">
-          ${items.map(it => `
-            <div class="word-card">
-              <div class="word-title">${esc(it.word)}</div>
-              <div>Part of speech: <em>${esc(it.pos)}</em></div>
-              <div>Definition: ${esc(it.def)}</div>
-              ${it.example ? `<div class="example-sentence">• ${esc(it.example)}</div>` : ''}
-            </div>
-          `).join('')}
-        </div>
-      `;
+      const items = data.slice(0, limit).map(it => ({
+        word: String(it.word ?? '').trim(),
+        pos: String(it.pos ?? '').trim(),
+        def: String(it.def ?? '').trim(),
+        example: String(it.example ?? '').trim()
+      }));
+      return { items };
     } catch (_) {
       return null;
     }
+  }
+
+  // Render word cards HTML from items
+  renderVocabItems(items) {
+    const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c]));
+    return `
+      <div class="polyglot-vocabulary-analysis">
+        ${items.map(it => `
+          <div class="word-card">
+            <div class="word-title">${esc(it.word)}</div>
+            <div>Part of speech: <em>${esc(it.pos)}</em></div>
+            <div>Definition: ${esc(it.def)}</div>
+            ${it.translation ? `<div>Translation: ${esc(it.translation)}</div>` : ''}
+            ${it.pron ? `<div>Pronunciation: <code>${esc(it.pron)}</code></div>` : ''}
+            ${it.cefr ? `<div>Level: ${esc(it.cefr)}</div>` : ''}
+            ${it.frequency ? `<div>Frequency: ${esc(it.frequency)}</div>` : ''}
+            ${it.family ? `<div>Word family: ${esc(it.family)}</div>` : ''}
+            ${it.synonyms ? `<div>Synonyms: ${esc(it.synonyms)}</div>` : ''}
+            ${it.collocations ? `<div>Collocations: ${esc(it.collocations)}</div>` : ''}
+            ${it.example ? `<div class="example-sentence">• ${esc(it.example)}</div>` : ''}
+          </div>
+        `).join('')}
+      </div>
+    `;
+  }
+
+  // Best-effort parser for detailed analysis text to extract items
+  parseVocabFromAnalysisText(text) {
+    try {
+      const items = [];
+      const blocks = String(text || '').split(/\n\n|---/);
+      for (const b of blocks) {
+        const word = /-\s*Word:\s*([^\n]+)/i.exec(b)?.[1]?.trim();
+        if (!word) continue;
+        const def = /-\s*Definition:\s*([^\n]+)/i.exec(b)?.[1]?.trim() || '';
+        const pos = /-\s*Part of speech:\s*([^\n]+)/i.exec(b)?.[1]?.trim() || '';
+        const pron = /-\s*Pronunciation:\s*([^\n]+)/i.exec(b)?.[1]?.trim() || '';
+        const trans = /-\s*Translation:\s*([^\n]+)/i.exec(b)?.[1]?.trim() || '';
+        const cefr = /-\s*(CEFR|Level):\s*([^\n]+)/i.exec(b)?.[2]?.trim() || '';
+        const freq = /-\s*Frequency:\s*([^\n]+)/i.exec(b)?.[1]?.trim() || '';
+        const family = /-\s*(Word\s*family|Related\s*terms):\s*([^\n]+)/i.exec(b)?.[2]?.trim() || '';
+        const synonyms = /-\s*Synonyms?:\s*([^\n]+)/i.exec(b)?.[1]?.trim() || '';
+        const collocs = /-\s*Collocations?:\s*([^\n]+)/i.exec(b)?.[1]?.trim() || '';
+        // Try to find an example line (numbered or bullet)
+        const ex = /(\d+\.\s+[^\n]+|•\s+[^\n]+|-\s+[^\n]+)/.exec(b)?.[0]?.replace(/^\d+\.\s*|^•\s*|^-\s*/,'').trim() || '';
+        items.push({ word, pos, def, example: ex, pron, translation: trans, cefr, frequency: freq, family, synonyms, collocations: collocs });
+      }
+      return items.slice(0, this.settings.vocabMaxItems || 12);
+    } catch {
+      return [];
+    }
+  }
+
+  // Load and save persistent vocabulary list
+  async loadVocabList() {
+    try {
+      const data = await chrome.storage.local.get({ polyglotVocabList: [] });
+      this.vocabularyList = Array.isArray(data.polyglotVocabList) ? data.polyglotVocabList : [];
+    } catch (e) {
+      this.vocabularyList = [];
+    }
+  }
+
+  async saveVocabList() {
+    try {
+      await chrome.storage.local.set({ polyglotVocabList: this.vocabularyList });
+    } catch (e) {
+      console.error('Failed to persist vocabulary list:', e);
+    }
+  }
+
+  // Public actions for buttons
+  async saveVocabularyToLocal() {
+    try {
+      if (!Array.isArray(this.lastVocabItems) || this.lastVocabItems.length === 0) {
+        console.log('No vocabulary items available to save.');
+        return;
+      }
+      // Deduplicate by word+pos
+      const keyOf = (it) => `${it.word}:::${it.pos}`.toLowerCase();
+      const existing = new Set(this.vocabularyList.map(keyOf));
+      let added = 0;
+      for (const it of this.lastVocabItems) {
+        const key = keyOf(it);
+        if (it.word && !existing.has(key)) {
+          this.vocabularyList.push({ ...it, savedAt: Date.now() });
+          existing.add(key);
+          added++;
+        }
+      }
+      await this.saveVocabList();
+      console.log(`✅ Saved ${added} new item(s) to local vocabulary list (total: ${this.vocabularyList.length}).`);
+    } catch (e) {
+      console.error('Failed to save vocabulary:', e);
+    }
+  }
+
+  exportVocabularyAsCSV(items = this.lastVocabItems) {
+    if (!Array.isArray(items) || items.length === 0) {
+      console.log('No vocabulary items to export as CSV.');
+      return;
+    }
+    const esc = (s) => '"' + String(s ?? '').replace(/"/g, '""') + '"';
+    const rows = [['word','pos','definition','example']]
+      .concat(items.map(it => [esc(it.word), esc(it.pos), esc(it.def), esc(it.example)]))
+      .map(cols => cols.join(','))
+      .join('\r\n');
+    const blob = new Blob([rows], { type: 'text/csv;charset=utf-8' });
+    this.triggerDownload(`vocabulary_${Date.now()}.csv`, blob);
+  }
+
+  exportVocabularyAsTSVForAnki(items = this.lastVocabItems) {
+    if (!Array.isArray(items) || items.length === 0) {
+      console.log('No vocabulary items to export as TSV.');
+      return;
+    }
+    // Anki-friendly TSV without header; fields: Word\tDefinition (POS)\tExample
+    const rows = items.map(it => [it.word, `${it.def}${it.pos ? ` (${it.pos})` : ''}`, it.example].join('\t')).join('\r\n');
+    const blob = new Blob([rows], { type: 'text/tab-separated-values;charset=utf-8' });
+    this.triggerDownload(`vocabulary_anki_${Date.now()}.tsv`, blob);
+  }
+
+  triggerDownload(filename, blob) {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }, 0);
   }
 
   displayResults(originalText, translation, pronunciation, sourceLang, targetLang, learningContent, learningFocus, requestId) {
@@ -1318,6 +1604,15 @@ Format as clear sections with emojis. Respond in ${targetLang}.`;
           </div>
         </div>
       `;
+      if (learningFocus === 'vocabulary') {
+        html += `
+          <div class="polyglot-action-buttons">
+            <button class="polyglot-button" onclick="window.__polyglotReader?.saveVocabularyToLocal()">Save Words</button>
+            <button class="polyglot-button" onclick="window.__polyglotReader?.exportVocabularyAsCSV()">Export Current CSV</button>
+            <button class="polyglot-button" onclick="window.__polyglotReader?.exportVocabularyAsTSVForAnki()">Export Current Anki (TSV)</button>
+          </div>
+        `;
+      }
     } else {
       console.log(`ℹ️ No learning content to display: content=${!!learningContent}, focus=${learningFocus}`);
     }
@@ -1366,5 +1661,5 @@ if (document.readyState === 'loading') {
     new PolyglotReader();
   });
 } else {
-  new PolyglotReader();
+  window.__polyglotReader = new PolyglotReader();
 }

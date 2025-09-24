@@ -42,5 +42,9 @@
       "resources": ["tooltip.html", "icons/*"],
       "matches": ["<all_urls>"]
     }
+  ],
+  "trial_tokens": [
+    "A95gyOQZlh7YNsiosZr0tA5h11/3go2j9hstXOMRfDP3f9g+T9pkR1HcnZMgGk4ly1WDlofxdA0JPYZNjZeuPQ8AAACAeyJvcmlnaW4iOiJjaHJvbWUtZXh0ZW5zaW9uOi8vYmFsZGxtY29vamNkZ25ma2drbW1vaGlwY2Fia2diZ2giLCJmZWF0dXJlIjoiQUlXcml0ZXJBUEkiLCJleHBpcnkiOjE3Njk0NzIwMDAsImlzVGhpcmRQYXJ0eSI6dHJ1ZX0=",
+    "A9oLIlk1HQkl4k8yN/LOXgUpG1/F6dcqFZ0nkn/fd+7m5ohwlgk99pM+UzNhmsJMqQr5nut1twXJW9PpPNgKXgQAAACCeyJvcmlnaW4iOiJjaHJvbWUtZXh0ZW5zaW9uOi8vYmFsZGxtY29vamNkZ25ma2drbW1vaGlwY2Fia2diZ2giLCJmZWF0dXJlIjoiQUlSZXdyaXRlckFQSSIsImV4cGlyeSI6MTc2OTQ3MjAwMCwiaXNUaGlyZFBhcnR5Ijp0cnVlfQ=="
   ]
 }

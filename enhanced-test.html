@@ -125,12 +125,29 @@
 
     <div class="api-status">
         <h3>🤖 Chrome AI API Status</h3>
-        <p>Check your browser console (F12) to see which AI APIs are available.</p>
+        <p>Use the buttons to run tests (some APIs require a user gesture). Results appear below and in the console.</p>
         <div id="apiStatusList">
-            <div><span class="status-indicator status-yellow"></span> Language Model: Checking...</div>
-            <div><span class="status-indicator status-yellow"></span> Translator: Checking...</div>
-            <div><span class="status-indicator status-yellow"></span> Other APIs: Checking...</div>
+            <div id="status-language-model"><span class="status-indicator status-yellow"></span> <span class="status-label">Language Model:</span> <span class="status-text">Checking...</span></div>
+            <div id="status-translator"><span class="status-indicator status-yellow"></span> <span class="status-label">Translator:</span> <span class="status-text">Checking...</span></div>
+            <div id="status-summarizer"><span class="status-indicator status-yellow"></span> <span class="status-label">Summarizer:</span> <span class="status-text">Checking...</span></div>
+            <div id="status-language-detector"><span class="status-indicator status-yellow"></span> <span class="status-label">Language Detector:</span> <span class="status-text">Checking...</span></div>
+            <div id="status-writer"><span class="status-indicator status-yellow"></span> <span class="status-label">Writer:</span> <span class="status-text">Checking...</span></div>
+            <div id="status-rewriter"><span class="status-indicator status-yellow"></span> <span class="status-label">Rewriter:</span> <span class="status-text">Checking...</span></div>
+            <div id="status-proofreader"><span class="status-indicator status-yellow"></span> <span class="status-label">Proofreader:</span> <span class="status-text">Checking...</span></div>
         </div>
+
+        <div style="margin-top: 12px; display: flex; flex-wrap: wrap; gap: 8px;">
+            <button id="btn-check">Re-check Availability</button>
+            <button id="btn-langmodel">Test LanguageModel</button>
+            <button id="btn-translator">Test Translator</button>
+            <button id="btn-summarizer">Test Summarizer</button>
+            <button id="btn-langdetector">Test Language Detector</button>
+            <button id="btn-writer">Test Writer</button>
+            <button id="btn-rewriter">Test Rewriter</button>
+            <button id="btn-proofreader">Test Proofreader</button>
+            <button id="btn-prompt">Test Prompt API</button>
+        </div>
+        <div id="apiResults" class="debug-info" style="margin-top: 12px;"></div>
     </div>
 
     <div class="test-instructions">
@@ -287,6 +304,7 @@
             }
         });
     </script>
+    <script src="./test-apis.js"></script>
 
     <footer style="text-align: center; margin-top: 60px; padding: 30px; color: #64748b; border-top: 1px solid #e2e8f0;">
         <h3>🚀 PolyglotReader Extension Test Environment</h3>
