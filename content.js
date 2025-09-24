@@ -8,306 +8,59 @@ class PolyglotReader {
       autoDetectLanguage: true,
       showPronunciation: true,
       showExamples: true,
-      // Vocabulary performance/quality strategy
-      // 'adaptive' -> compact JSON for long text, full for short
-      // 'full'     -> always full detailed prompt
-  // 'fast'     -> always compact JSON prompt
-  vocabStrategy: 'adaptive',
-      maxVocabularyChars: 400,
-      vocabMaxItems: 12
+      // Always use all available AI APIs in vocabulary mode
+      vocabUseAllApis: true,
+      // Enable enrichment features (examples, rewrites, proofreading, translation)
+      enrichVocab: true,
+      // Enrichment bounds (defaults; may be overridden by stored settings)
+      vocabEnrichMaxItems: 6,
+      vocabEnrichConcurrency: 2,
+      // Other UI defaults
+      vocabStrategy: 'adaptive',
+      summaryLength: 'medium'
     };
+
+    // Runtime/UI state
+    this.requestCounter = 0;
+    this.activeRequestId = 0;
     this.selectedText = '';
     this.isTooltipVisible = false;
-    this.aiApis = {};
-    // Track in-flight processing to avoid race conditions when user changes focus/language
-    this.requestCounter = 0;     // Monotonically increasing id
-    this.activeRequestId = 0;    // The latest request id; only this one may update the UI
-    // Debounce handle for reprocessing when dropdowns change
+    this.lastSelectionKey = '';
+    this.lastSelectionAt = 0;
     this.reprocessTimer = null;
-    // Simple in-memory cache for learning content (LRU-ish)
+    this.lastSourceLang = 'auto';
+    this.lastVocabItems = [];
+    this.vocabularyList = [];
     this.learningCache = new Map();
     this.learningCacheOrder = [];
-  // Track last processed selection to avoid duplicate processing from rapid events
-  this.lastSelectionKey = '';
-  this.lastSelectionAt = 0;
-  // Track in-flight learning content computations to dedupe concurrent requests
-  this.inFlightLearning = new Map();
-  // Persistent vocabulary list and current selection vocabulary
-  this.vocabularyList = [];
-  this.lastVocabItems = [];
-    
-    this.init();
+    this.inFlightLearning = new Map();
+
+    // Setup UI and async resources
+    try { this.createTooltip(); } catch (_) {}
+    try { this.bindEvents(); } catch (_) {}
+    // Load saved settings (sync) and apply to tooltip
+    try { this.loadSettingsFromSync(); } catch (_) {}
+    // Fire-and-forget async init
+    try { this.loadVocabList(); } catch (_) {}
+  try { window.PG?.ai?.initializeAIAPIs?.(); } catch (_) {}
   }
 
-  async init() {
-    await this.loadSettings();
-    console.log('🔍 Checking Chrome AI API availability...');
-    this.checkAIAvailability();
-    await this.initializeAIAPIs();
-    await this.loadVocabList();
-    this.createTooltip();
-    this.bindEvents();
-    console.log('✅ PolyglotReader initialized');
-    
-    // Show API status
-    this.logAPIStatus();
-  }
 
-  checkAIAvailability() {
-    console.log('\n🔬 Chrome AI Environment Check:');
-    console.log('================================');
-    console.log('User Agent:', navigator.userAgent);
-    console.log('Chrome Version:', navigator.userAgent.match(/Chrome\/(\d+)/)?.[1] || 'Unknown');
-    
-    console.log('\n🔍 API Object Detection:');
-    console.log('window.ai exists:', typeof window.ai);
-    console.log('window.ai object:', window.ai);
-    
-    if (window.ai) {
-      console.log('window.ai.languageModel:', typeof window.ai.languageModel);
-      console.log('window.ai.translator:', typeof window.ai.translator);
-      console.log('window.ai.summarizer:', typeof window.ai.summarizer);
-      console.log('window.ai.writer:', typeof window.ai.writer);
-      console.log('window.ai.rewriter:', typeof window.ai.rewriter);
-      console.log('window.ai.proofreader:', typeof window.ai.proofreader);
-      console.log('window.ai.languageDetector:', typeof window.ai.languageDetector);
-    }
-    
-    console.log('\n🆕 New API Detection:');
-    console.log('window.LanguageModel:', typeof window.LanguageModel);
-    console.log('window.Translator:', typeof window.Translator);
-    
-    if (typeof window.ai === 'undefined' && typeof window.LanguageModel === 'undefined') {
-      console.log('\n❌ No Chrome AI APIs detected!');
-      console.log('📋 To enable Chrome AI APIs in Chrome Canary:');
-      console.log('1. Go to chrome://flags/');
-      console.log('2. Search for "Optimization Guide On Device Model"');
-      console.log('3. Enable "BypassPerfRequirement"');
-      console.log('4. Search for "prompt-api-for-gemini-nano"');
-      console.log('5. Enable it');
-      console.log('6. Restart Chrome Canary');
-      console.log('7. Go to chrome://components/');
-      console.log('8. Find "Optimization Guide On Device Model" and click "Check for update"');
-    }
-  }
-
-  logAPIStatus() {
-    console.log('\n🤖 Chrome AI API Status:');
-    console.log('========================');
-    
-    const apiStatus = {
-      'Language Model': this.aiApis.languageModel ? '✅ Available' : '❌ Not available',
-      'Translator': this.aiApis.translator ? '✅ Available' : '❌ Not available', 
-      'Summarizer': this.aiApis.summarizer ? '✅ Available' : '❌ Not available',
-      'Writer': this.aiApis.writer ? '✅ Available' : '❌ Not available',
-      'Rewriter': this.aiApis.rewriter ? '✅ Available' : '❌ Not available',
-      'Proofreader': this.aiApis.proofreader ? '✅ Available' : '❌ Not available',
-      'Language Detector': this.aiApis.languageDetector ? '✅ Available' : '❌ Not available'
-    };
-    
-    Object.entries(apiStatus).forEach(([api, status]) => {
-      console.log(`${api}: ${status}`);
-    });
-    
-    const availableCount = Object.values(this.aiApis).filter(api => api !== null).length;
-    console.log(`\n📊 Total: ${availableCount}/7 APIs available`);
-    
-    if (availableCount === 0) {
-      console.log('\n⚠️ No Chrome AI APIs are available. Make sure you are using Chrome 121+ with AI features enabled.');
-      console.log('💡 The extension will still work with basic translation fallbacks.');
-    }
-  }
-
-  async loadSettings() {
+  // Load user settings from chrome.storage.sync and merge with defaults
+  async loadSettingsFromSync() {
     try {
       const stored = await chrome.storage.sync.get(this.settings);
       this.settings = { ...this.settings, ...stored };
-    } catch (error) {
-      console.error('Error loading settings:', error);
+      this.updateTooltipSettings?.();
+    } catch (e) {
+      console.log('Failed to load settings from sync:', e?.message || e);
     }
   }
 
-  async initializeAIAPIs() {
-    console.log('🔍 Checking for Chrome AI APIs...');
-    
-    // Check if Chrome AI is available at all
-    const hasWindowAI = typeof window.ai !== 'undefined';
-    const hasNewAPIs = typeof window.LanguageModel !== 'undefined' || typeof window.Translator !== 'undefined';
-    
-    console.log(`window.ai available: ${hasWindowAI}`);
-    console.log(`New APIs available: ${hasNewAPIs}`);
-    
-    if (!hasWindowAI && !hasNewAPIs) {
-      console.log('❌ No Chrome AI APIs detected. Please enable them in Chrome Canary.');
-      return;
-    }
-    
-    try {
-      // Initialize Language Model with proper configuration
-      if (window.LanguageModel?.create) {
-        try {
-          // New API doesn't have capabilities method, try direct creation
-          this.aiApis.languageModel = await window.LanguageModel.create({
-            systemPrompt: "You are a helpful language learning assistant.",
-            temperature: 0.7,
-            topK: 40
-          });
-          console.log('✅ New LanguageModel API initialized');
-        } catch (error) {
-          console.log('⚠️ New LanguageModel API failed:', error.message);
-          
-          // Try without parameters
-          try {
-            this.aiApis.languageModel = await window.LanguageModel.create();
-            console.log('✅ New LanguageModel API initialized (no params)');
-          } catch (error2) {
-            console.log('⚠️ New LanguageModel API failed (no params):', error2.message);
-          }
-        }
-      }
-      
-      if (!this.aiApis.languageModel && window.ai?.languageModel?.create) {
-        try {
-          // Check capabilities first
-          const capabilities = await window.ai.languageModel.capabilities();
-          console.log('Legacy Language Model capabilities:', capabilities);
-          
-          if (capabilities.available === 'readily') {
-            this.aiApis.languageModel = await window.ai.languageModel.create({
-              systemPrompt: "You are a helpful language learning assistant.",
-              temperature: 0.7,
-              topK: 40
-            });
-            console.log('✅ Legacy LanguageModel API initialized');
-          } else {
-            console.log('⚠️ Language Model not readily available:', capabilities.available);
-          }
-        } catch (error) {
-          console.log('⚠️ Legacy LanguageModel API failed:', error.message);
-        }
-      }
-
-      // Initialize Translator: deferred to user gesture.
-      // We'll lazily create the Translator in ensureTranslatorReady() when
-      // the user selects text or otherwise interacts with the page.
-        // NOTE: Do NOT initialize Translator here. Creating a Translator often
-        // requires a user gesture when availability is "downloadable" or "downloading".
-        // We'll lazily create it during a user interaction (e.g., mouseup) via
-        // ensureTranslatorReady().
-
-      // Initialize Summarizer
-      if (window.ai?.summarizer?.create) {
-        try {
-          const capabilities = await window.ai.summarizer.capabilities();
-          console.log('Summarizer capabilities:', capabilities);
-          
-          if (capabilities.available === 'readily') {
-            this.aiApis.summarizer = await window.ai.summarizer.create({
-              type: 'key-points',
-              format: 'markdown',
-              length: 'medium'
-            });
-            console.log('✅ Summarizer API initialized');
-          } else {
-            console.log('⚠️ Summarizer not readily available:', capabilities.available);
-          }
-        } catch (error) {
-          console.log('⚠️ Summarizer API failed:', error.message);
-        }
-      }
-
-      // Initialize Writer
-      if (window.ai?.writer?.create) {
-        try {
-          const capabilities = await window.ai.writer.capabilities();
-          console.log('Writer capabilities:', capabilities);
-          
-          if (capabilities.available === 'readily') {
-            this.aiApis.writer = await window.ai.writer.create({
-              tone: 'formal',
-              format: 'plain-text',
-              length: 'medium'
-            });
-            console.log('✅ Writer API initialized');
-          } else {
-            console.log('⚠️ Writer not readily available:', capabilities.available);
-          }
-        } catch (error) {
-          console.log('⚠️ Writer API failed:', error.message);
-        }
-      }
-
-      // Initialize Rewriter
-      if (window.ai?.rewriter?.create) {
-        try {
-          const capabilities = await window.ai.rewriter.capabilities();
-          console.log('Rewriter capabilities:', capabilities);
-          
-          if (capabilities.available === 'readily') {
-            this.aiApis.rewriter = await window.ai.rewriter.create({
-              tone: 'as-is',
-              format: 'as-is',
-              length: 'as-is'
-            });
-            console.log('✅ Rewriter API initialized');
-          } else {
-            console.log('⚠️ Rewriter not readily available:', capabilities.available);
-          }
-        } catch (error) {
-          console.log('⚠️ Rewriter API failed:', error.message);
-        }
-      }
-
-      // Initialize Proofreader
-      if (window.ai?.proofreader?.create) {
-        try {
-          const capabilities = await window.ai.proofreader.capabilities();
-          console.log('Proofreader capabilities:', capabilities);
-          
-          if (capabilities.available === 'readily') {
-            this.aiApis.proofreader = await window.ai.proofreader.create();
-            console.log('✅ Proofreader API initialized');
-          } else {
-            console.log('⚠️ Proofreader not readily available:', capabilities.available);
-          }
-        } catch (error) {
-          console.log('⚠️ Proofreader API failed:', error.message);
-        }
-      }
-
-      // Initialize Language Detector
-      if (window.ai?.languageDetector?.create) {
-        try {
-          const capabilities = await window.ai.languageDetector.capabilities();
-          console.log('Language Detector capabilities:', capabilities);
-          
-          if (capabilities.available === 'readily') {
-            this.aiApis.languageDetector = await window.ai.languageDetector.create();
-            console.log('✅ Language Detector API initialized');
-          } else {
-            console.log('⚠️ Language Detector not readily available:', capabilities.available);
-          }
-        } catch (error) {
-          console.log('⚠️ Language Detector API failed:', error.message);
-        }
-      }
-
-      const initializedApis = Object.entries(this.aiApis).filter(([key, value]) => value !== null);
-      console.log(`🎉 Successfully initialized ${initializedApis.length}/7 AI APIs:`, initializedApis.map(([key]) => key));
-      
-      // Fire-and-forget warm-up for Language Model to reduce first-token latency (non-blocking)
-      if (this.aiApis.languageModel) {
-        try {
-          Promise.race([
-            this.aiApis.languageModel.prompt('ok', { language: 'en' }),
-            new Promise((_, r) => setTimeout(() => r(new Error('warmup-timeout')), 1500))
-          ]).catch(() => {/* ignore warmup timeout */});
-        } catch (_) { /* ignore */ }
-      }
-      
-    } catch (error) {
-      console.error('Error initializing AI APIs:', error);
-    }
+  // Minimal HTML escape for safe text insertion
+  escapeHTML(s) {
+    if (window.PG?.lang?.escapeHTML) return window.PG.lang.escapeHTML(s);
+    return String(s ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
   }
 
   /**
@@ -315,110 +68,204 @@ class PolyglotReader {
    * Stores the instance on this.aiApis.translator for reuse and returns it.
    * Will use the new Translator API if available, otherwise attempts legacy API.
    */
-  async ensureTranslatorReady(targetLanguage = 'es', sourceLanguage = 'auto') {
+
+  /**
+   * Ensure a Summarizer instance is created (preferably during a user gesture).
+   * Supports both the new Summarizer global and the legacy window.ai.summarizer API.
+   * The created session respects the current summary length preference.
+   */
+
+  // Optional: Ensure Writer session when available
+
+  // Optional: Ensure Rewriter session when available
+
+  // Optional: Ensure Proofreader session when available
+
+  // Enrich vocabulary items using available Chrome AI APIs (Writer, Rewriter, Proofreader, Translator, Summarizer)
+  async enrichVocabularyItems(items, { sourceLang, targetLang, strategy } = {}) {
     try {
-      // If already created, return it
-      if (this.aiApis.translator) return this.aiApis.translator;
+      if (!Array.isArray(items) || items.length === 0) return items;
+      // Always enrich all items in vocabulary mode to use all available APIs
+      const maxN = items.length;
 
-      // Prefer new API when available
-      if (window.Translator?.create) {
-        // Try the requested language first - avoid 'auto' and same-language pairs
-        let sourceLang = (sourceLanguage && sourceLanguage !== 'auto') ? sourceLanguage : 'en';
-        let targetLang = targetLanguage || 'es';
-        
-        // Avoid same-language pairs
-        if (sourceLang === targetLang) {
-          console.log(`⚠️ Same language pair ${sourceLang}→${targetLang} detected, adjusting...`);
-          if (targetLang === 'en') {
-            targetLang = 'es'; // If targeting English, switch to Spanish
+      // Prepare available sessions
+      const writer = window.PG?.ai?.ensureWriterReady ? await window.PG.ai.ensureWriterReady() : null;
+      const rewriter = window.PG?.ai?.ensureRewriterReady ? await window.PG.ai.ensureRewriterReady() : null;
+      const proofreader = window.PG?.ai?.ensureProofreaderReady ? await window.PG.ai.ensureProofreaderReady() : null;
+      const summarizer = window.PG?.ai?.ensureSummarizerReady ? await window.PG.ai.ensureSummarizerReady() : null;
+      // Translator on-demand per pair
+
+      // Process items concurrently for better performance
+      const enrichmentPromises = [];
+      for (let i = 0; i < maxN; i++) {
+        enrichmentPromises.push(this.enrichSingleItem(items[i], { writer, rewriter, proofreader, summarizer, sourceLang, targetLang, strategy }));
+      }
+      
+      const enrichedItems = await Promise.all(enrichmentPromises);
+      return enrichedItems;
+    } catch (_) {
+      return items;
+    }
+  }
+
+  // Enrich a single vocabulary item with timeout for performance
+  async enrichSingleItem(it, { writer, rewriter, proofreader, summarizer, sourceLang, targetLang, strategy }) {
+    const startTime = Date.now();
+    try {
+      const sessions = window.PG?.ai?.getSessions();
+      
+      // Ensure we have the correct source language for the example
+      const actualSourceLang = sourceLang || 'auto';
+      console.log(`🎯 Creating example for "${it.word}" in ${actualSourceLang}`);
+      
+      // 0) Ensure we have a concise dictionary-style definition
+      if ((!it.def || it.def.length < 3) && sessions?.languageModel) {
+        try {
+          const tgtName = targetLang || 'en';
+          const prompt = `Return ONLY a concise dictionary-style definition (max 18 words) for the ${actualSourceLang} word "${it.word}" in ${tgtName}. No examples, no extra text.`;
+          const out = await sessions.languageModel.prompt(prompt, { language: this.getLanguageCode(targetLang || 'en') });
+          const def = String(out || '').trim().replace(/^[-*•\d.\s]+/, '');
+          if (def) it.def = def;
+        } catch (_) { /* ignore */ }
+      }
+      
+      // 0) Ensure we have a concise dictionary-style definition
+      if ((!it.def || it.def.length < 3) && sessions?.languageModel) {
+        try {
+          const tgtName = targetLang || 'en';
+          const prompt = `Return ONLY a concise dictionary-style definition (max 18 words) for the ${actualSourceLang} word "${it.word}" in ${tgtName}. No examples, no extra text.`;
+          const out = await sessions.languageModel.prompt(prompt, { language: this.getLanguageCode(targetLang || 'en') });
+          const def = String(out || '').trim().replace(/^[-*•\d.\s]+/, '');
+          if (def) it.def = def;
+        } catch (_) { /* ignore */ }
+      }
+      
+      // 1) Ensure we have an example sentence (short). Use fast Language Model instead of slower Writer API.
+      if ((!it.example || it.example.length < 4) && sessions?.languageModel) {
+        try {
+          const prompt = `Write one short, simple ${actualSourceLang} sentence using the word "${it.word}" at CEFR A2 level. Keep it under 12 words. Return ONLY the sentence, no explanations.`;
+          const out = await sessions.languageModel.prompt(prompt, { language: this.getLanguageCode(actualSourceLang || 'auto') });
+          it.example = String(out || '').trim();
+        } catch (e) { 
+          console.log(`⚠️ Language Model example failed for "${it.word}":`, e);
+          // Fallback to Writer API only if Language Model fails
+          if (writer) {
+            try {
+              const prompt = `Write one short, simple ${actualSourceLang} sentence using the word "${it.word}" at CEFR A2. Keep it under 12 words.`;
+              const out = await writer.write({ prompt });
+              it.example = String(out?.text || out || '').trim();
+            } catch (e2) { /* ignore */ }
+          }
+        }
+      }
+
+      // Post-process example to ensure it's actually short (max 2 sentences, 120 characters)
+      if (it.example && it.example.length > 120) {
+        // Split by sentence boundaries and take first 1-2 sentences
+        const sentences = it.example.split(/[.!?。！？]+/).map(s => s.trim()).filter(Boolean);
+        if (sentences.length > 0) {
+          const short = sentences.slice(0, 2).join('. ');
+          if (short.length <= 120) {
+            it.example = short + (short.match(/[.!?。！？]$/) ? '' : '.');
           } else {
-            sourceLang = 'en'; // Otherwise, use English as source
+            // Even 2 sentences are too long, take just the first one
+            it.example = sentences[0] + (sentences[0].match(/[.!?。！？]$/) ? '' : '.');
           }
-        }
-        
-        const params = { 
-          sourceLanguage: sourceLang,
-          targetLanguage: targetLang 
-        };
-        
-        try {
-          this.aiApis.translator = await window.Translator.create(params);
-          console.log('✅ Translator ready (new API)');
-          // Reflect updated availability in console status
-          this.logAPIStatus();
-          return this.aiApis.translator;
-        } catch (languagePairError) {
-          console.log(`⚠️ Language pair ${params.sourceLanguage}→${params.targetLanguage} unsupported, trying fallback...`);
-          // Try common supported pairs as fallback - no 'auto' language
-          const fallbackPairs = [
-            { sourceLanguage: 'en', targetLanguage: 'es' },
-            { sourceLanguage: 'en', targetLanguage: 'fr' },
-            { sourceLanguage: 'es', targetLanguage: 'en' },
-            { sourceLanguage: 'fr', targetLanguage: 'en' }
-          ];
-          
-          for (const fallbackParams of fallbackPairs) {
-            try {
-              this.aiApis.translator = await window.Translator.create(fallbackParams);
-              console.log(`✅ Translator ready with fallback pair ${fallbackParams.sourceLanguage}→${fallbackParams.targetLanguage}`);
-              this.logAPIStatus();
-              return this.aiApis.translator;
-            } catch (fallbackError) {
-              console.log(`⚠️ Fallback pair ${fallbackParams.sourceLanguage}→${fallbackParams.targetLanguage} also failed`);
-            }
-          }
-          throw languagePairError; // If all fallbacks fail, throw original error
         }
       }
 
-      // Fallback to legacy API if available and readily available
-      if (window.ai?.translator?.create) {
+      // 2) Simplify example for beginners - try fast Language Model first, fallback to Rewriter
+      if (it.example && it.example.length > 20) {
         try {
-          const capabilities = await window.ai.translator.capabilities();
-          console.log('Legacy Translator capabilities:', capabilities);
-          if (capabilities.available === 'readily') {
-            const params = { 
-              sourceLanguage: (sourceLanguage && sourceLanguage !== 'auto') ? sourceLanguage : 'en',
-              targetLanguage: targetLanguage || 'es' 
-            };
-            
-            try {
-              this.aiApis.translator = await window.ai.translator.create(params);
-              console.log('✅ Translator ready (legacy API)');
-              // Reflect updated availability in console status
-              this.logAPIStatus();
-              return this.aiApis.translator;
-            } catch (languagePairError) {
-              console.log(`⚠️ Legacy language pair ${params.sourceLanguage}→${params.targetLanguage} unsupported, trying fallback...`);
-              // Try fallback pairs for legacy API too - no 'auto' language
-              const fallbackPairs = [
-                { sourceLanguage: 'en', targetLanguage: 'es' },
-                { sourceLanguage: 'en', targetLanguage: 'fr' },
-                { sourceLanguage: 'es', targetLanguage: 'en' }
-              ];
-              
-              for (const fallbackParams of fallbackPairs) {
-                try {
-                  this.aiApis.translator = await window.ai.translator.create(fallbackParams);
-                  console.log(`✅ Legacy Translator ready with fallback pair ${fallbackParams.sourceLanguage}→${fallbackParams.targetLanguage}`);
-                  this.logAPIStatus();
-                  return this.aiApis.translator;
-                } catch (fallbackError) {
-                  console.log(`⚠️ Legacy fallback pair ${fallbackParams.sourceLanguage}→${fallbackParams.targetLanguage} also failed`);
-                }
-              }
+          // Try Language Model first (faster)
+          if (sessions?.languageModel) {
+            const prompt = `Simplify this ${actualSourceLang} sentence to be shorter and easier (CEFR A1-A2 level). Return ONLY the simplified sentence:\n"""${it.example}"""`;
+            const out = await sessions.languageModel.prompt(prompt, { language: this.getLanguageCode(actualSourceLang || 'auto') });
+            const simp = String(out || '').trim();
+            if (simp && simp.length < it.example.length && simp.length <= it.example.length + 20) {
+              it.exampleSimple = simp;
             }
           }
-        } catch (err) {
-          console.log('⚠️ Legacy Translator create failed:', err?.message || err);
-        }
+          // Fallback to Rewriter API if Language Model didn't produce a good result
+          if (!it.exampleSimple && rewriter) {
+            const out = await rewriter.rewrite({ text: it.example });
+            const simp = String(out?.text || out || '').trim();
+            if (simp && simp.length <= it.example.length + 20) it.exampleSimple = simp;
+          }
+        } catch (e) { /* ignore */ }
       }
 
-      return null;
-    } catch (error) {
-      // Common case: requires user gesture when availability is downloading/downloadable
-      console.log('⚠️ Translator not ready:', error?.message || error);
-      return null;
+      // 3) Skip proofreading for speed - it's not essential for vocabulary learning
+      // Proofreader API is very slow and not critical for examples
+      
+      // Skip: Proofreader step removed for performance
+
+      // 4) Translate example to target language if different - use fast Language Model first
+      if (it.example && targetLang && sourceLang && targetLang !== sourceLang) {
+        try {
+          // Try Language Model first (faster for short sentences)
+          if (sessions?.languageModel && it.example.length <= 100) {
+            const prompt = `Translate this ${actualSourceLang} sentence to ${targetLang}. Return ONLY the translation:\n"""${it.example}"""`;
+            const out = await sessions.languageModel.prompt(prompt, { language: this.getLanguageCode(targetLang || 'en') });
+            const translation = String(out || '').trim();
+            if (translation && translation !== it.example) {
+              it.exampleTranslation = translation;
+            }
+          }
+          // Fallback to Translator API if Language Model didn't work
+          if (!it.exampleTranslation) {
+            const translator = window.PG?.ai?.ensureTranslatorReady ? await window.PG.ai.ensureTranslatorReady(targetLang, sourceLang) : null;
+            if (translator) {
+              const tr = await translator.translate(it.example);
+              it.exampleTranslation = String(tr?.translatedText || tr || '').trim();
+            }
+          }
+        } catch (e) { /* ignore */ }
+      }
+
+      // 4.5) Generate sentence transliteration (Romaji/Pinyin/romanization) using Language Model
+      if (it.example && sessions?.languageModel) {
+        try {
+          const label = actualSourceLang === 'ja' ? 'romaji' : (actualSourceLang === 'zh' ? 'pinyin' : 'latin script transliteration');
+          const langName = actualSourceLang || 'source language';
+          const prompt = `Return ONLY the ${label} of this ${langName} sentence (no translation, no explanations, no quotes):\n"""${it.example}"""`;
+          const lmOut = await sessions.languageModel.prompt(prompt, { language: this.getLanguageCode(targetLang || 'en') });
+          const transl = String(lmOut || '').trim();
+          if (transl) it.exampleTranslit = transl;
+        } catch (_) { /* ignore */ }
+      }
+
+      // 5) Skip usage summary for speed - Summarizer API is slow and not essential
+      // Usage summaries removed for performance - basic definition is sufficient
+
+      // 6) Generate transliteration for key lexical fields when in non-Latin scripts
+      if (sessions?.languageModel && (actualSourceLang === 'ja' || actualSourceLang === 'zh' || actualSourceLang === 'ko' || actualSourceLang === 'ar')) {
+        const label = actualSourceLang === 'ja' ? 'romaji' : (actualSourceLang === 'zh' ? 'pinyin' : 'latin script transliteration');
+        const toTranslit = [
+          ['family', it.family],
+          ['synonyms', it.synonyms],
+          ['antonyms', it.antonyms],
+          ['collocations', it.collocations]
+        ];
+        for (const [key, val] of toTranslit) {
+          try {
+            const text = String(val || '').trim();
+            if (!text) continue;
+            const prompt = `Return ONLY the ${label} for each comma-separated item below, preserving order and separation. Input: ${text}`;
+            const out = await sessions.languageModel.prompt(prompt, { language: this.getLanguageCode(targetLang || 'en') });
+            const t = String(out || '').trim();
+            if (t) it[`${key}Translit`] = t;
+          } catch (_) { /* ignore */ }
+        }
+      }
+      
+      const elapsed = Date.now() - startTime;
+      console.log(`✅ Enriched "${it.word}" in ${elapsed}ms`);
+      return it;
+    } catch (e) {
+      const elapsed = Date.now() - startTime;
+      console.log(`❌ Failed to enrich "${it.word}" after ${elapsed}ms:`, e.message);
+      return it;
     }
   }
 
@@ -464,6 +311,7 @@ class PolyglotReader {
           </select>
           <select class="polyglot-select" id="polyglot-learning-focus">
             <option value="translate">Translate</option>
+            <option value="summary">Summary</option>
             <option value="vocabulary">Vocabulary</option>
             <option value="grammar">Grammar</option>
             <option value="verbs">Verbs</option>
@@ -505,6 +353,9 @@ class PolyglotReader {
     chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
       if (request.action === 'settingsUpdated') {
         this.settings = { ...this.settings, ...request.settings };
+        // Lock: force vocabulary to use all APIs regardless of popup changes
+        this.settings.vocabUseAllApis = true;
+        this.settings.enrichVocab = true;
         this.updateTooltipSettings();
       } else if (request.action === 'testTooltip') {
         this.showTestTooltip(request.text);
@@ -528,6 +379,7 @@ class PolyglotReader {
   const targetLanguageSelect = this.tooltip.querySelector('#polyglot-target-language');
   const learningFocusSelect = this.tooltip.querySelector('#polyglot-learning-focus');
   const vocabDetailSelect = this.tooltip.querySelector('#polyglot-vocab-detail');
+  const summaryLengthSelect = null;
 
     if (targetLanguageSelect) {
       targetLanguageSelect.addEventListener('change', () => {
@@ -559,6 +411,7 @@ class PolyglotReader {
         if (vocabDetailSelect) {
           vocabDetailSelect.style.display = (learningFocusSelect.value === 'vocabulary') ? '' : 'none';
         }
+        // No summary length selector
       });
       
       // Test dropdown functionality
@@ -570,7 +423,7 @@ class PolyglotReader {
     }
     
     // Additional verification
-    if (vocabDetailSelect) {
+  if (vocabDetailSelect) {
       // Initialize selector with current strategy
       vocabDetailSelect.value = this.settings.vocabStrategy || 'adaptive';
       // Show/hide based on current focus
@@ -580,17 +433,21 @@ class PolyglotReader {
         const val = vocabDetailSelect.value;
         console.log('🧠 Vocab detail strategy changed to:', val);
         this.settings.vocabStrategy = val;
-        if (this.selectedText && this.isTooltipVisible && currentFocus === 'vocabulary') {
+        const focusNow = (this.tooltip?.querySelector?.('#polyglot-learning-focus')?.value) || this.settings.learningFocus || 'translate';
+        if (this.selectedText && this.isTooltipVisible && focusNow === 'vocabulary') {
           this.scheduleReprocessSelectedText();
         }
       });
     }
 
+    // No summary length selector
+
     console.log('Tooltip event binding complete. Elements found:', {
       closeBtn: !!closeBtn,
       targetLanguageSelect: !!targetLanguageSelect,
       learningFocusSelect: !!learningFocusSelect,
-      vocabDetailSelect: !!vocabDetailSelect
+      vocabDetailSelect: !!vocabDetailSelect,
+      summaryLengthSelect: !!summaryLengthSelect
     });
   }
 
@@ -615,13 +472,17 @@ class PolyglotReader {
     const textNow = selection.toString().trim();
     const currentFocus = this.tooltip?.querySelector?.('#polyglot-learning-focus')?.value || this.settings.learningFocus || 'translate';
 
-    // Attempt translator initialization on any non-empty selection (gesture)
+    // Attempt model initialization on any non-empty selection (gesture)
     if (textNow && textNow.length > 0) {
       const targetLanguageSelect = this.tooltip?.querySelector?.('#polyglot-target-language');
       const targetLangForInit = targetLanguageSelect?.value || this.settings.defaultLanguage || 'es';
       // Don't block UI; fire and forget to satisfy gesture requirement
       if (currentFocus === 'translate') {
-        this.ensureTranslatorReady(targetLangForInit);
+        window.PG?.ai?.ensureTranslatorReady?.(targetLangForInit);
+      } else if (currentFocus === 'summary') {
+        window.PG?.ai?.ensureSummarizerReady?.();
+        // Also warm up translator to enable summary translation to target language
+        window.PG?.ai?.ensureTranslatorReady?.(targetLangForInit);
       }
     }
 
@@ -635,7 +496,7 @@ class PolyglotReader {
       // Fire translator creation during the user gesture only for Translate mode; don't await UI
       // If models need to download, this user activation will satisfy the requirement
       if (currentFocus === 'translate') {
-        this.ensureTranslatorReady(targetLang);
+        window.PG?.ai?.ensureTranslatorReady?.(targetLang);
       }
 
       // Defer tooltip placement slightly to allow selection range to settle
@@ -705,6 +566,7 @@ class PolyglotReader {
     const targetLanguageSelect = this.tooltip.querySelector('#polyglot-target-language');
     const learningFocusSelect = this.tooltip.querySelector('#polyglot-learning-focus');
     const vocabDetailSelect = this.tooltip.querySelector('#polyglot-vocab-detail');
+    const summaryLengthSelect = this.tooltip.querySelector('#polyglot-summary-length');
     
     if (targetLanguageSelect) {
       targetLanguageSelect.value = this.settings.defaultLanguage;
@@ -715,6 +577,10 @@ class PolyglotReader {
     if (vocabDetailSelect) {
       vocabDetailSelect.value = this.settings.vocabStrategy || 'adaptive';
       vocabDetailSelect.style.display = (learningFocusSelect?.value === 'vocabulary') ? '' : 'none';
+    }
+    if (summaryLengthSelect) {
+      summaryLengthSelect.value = this.settings.summaryLength || 'medium';
+      summaryLengthSelect.style.display = (learningFocusSelect?.value === 'summary') ? '' : 'none';
     }
   }
 
@@ -737,10 +603,17 @@ class PolyglotReader {
 
       // Detect source language
       let detectedLang = 'auto';
-      if (this.settings.autoDetectLanguage && this.aiApis.languageDetector) {
+      if (this.settings.autoDetectLanguage && window.PG?.ai?.getSessions()?.languageDetector) {
         try {
-          const detection = await this.aiApis.languageDetector.detect(text);
-          detectedLang = detection.detectedLanguage || 'auto';
+          const sessions = window.PG?.ai?.getSessions();
+          if (sessions?.languageDetector) {
+            const detection = await sessions.languageDetector.detect(text);
+            const detectionResults = Array.isArray(detection) ? detection : [detection];
+            if (detectionResults.length > 0) {
+              detectedLang = detectionResults[0].detectedLanguage || detectionResults[0] || 'auto';
+              console.log(`🔍 Language detected: ${detectedLang}`);
+            }
+          }
         } catch (error) {
           console.error('Language detection failed:', error);
         }
@@ -781,18 +654,20 @@ class PolyglotReader {
       // Get translation (streaming if available) - ONLY if learning focus is 'translate'
       let translation = '';
       let pronunciation = '';
-      let actualSourceLang = detectedLang; // Initialize with detected language
+  let actualSourceLang = detectedLang; // Initialize with detected language
+      console.log(`🌐 Using source language: ${actualSourceLang}`);
       
       if (learningFocus === 'translate') {
         console.log('🔤 Translation mode: Running translation...');
         // If we don't yet have a translator, try to create one now
-        if (!this.aiApis.translator) {
-          await this.ensureTranslatorReady(actualTargetLang, detectedLang);
+        const sessions = window.PG?.ai?.getSessions();
+        if (!sessions?.translator) {
+          await window.PG?.ai?.ensureTranslatorReady?.(actualTargetLang, detectedLang);
         }
-        if (this.aiApis.translator) {
+        if (sessions?.translator) {
           try {
             // For new translator API, we might need to create a new instance with specific languages
-            let translatorInstance = this.aiApis.translator;
+            let translatorInstance = sessions.translator;
 
             // Check if we need to create a new translator for specific language pair
             if (window.Translator?.create && (detectedLang !== 'auto' || actualTargetLang !== 'en')) {
@@ -848,13 +723,16 @@ class PolyglotReader {
         }
 
         // Get pronunciation if enabled
-        if (this.settings.showPronunciation && this.aiApis.languageModel) {
+        if (this.settings.showPronunciation && window.PG?.ai?.getSessions()?.languageModel) {
           try {
             const langCode = this.getLanguageCode(actualTargetLang);
             const prompt = `Provide phonetic pronunciation for "${translation}" in ${actualTargetLang}. Just return the pronunciation guide.`;
-            pronunciation = await this.aiApis.languageModel.prompt(prompt, {
-              language: langCode
-            });
+            const sessions = window.PG?.ai?.getSessions();
+            if (sessions?.languageModel) {
+              pronunciation = await sessions.languageModel.prompt(prompt, {
+                language: langCode
+              });
+            }
           } catch (error) {
             console.error('Pronunciation failed:', error);
           }
@@ -866,7 +744,10 @@ class PolyglotReader {
         pronunciation = '';
       }
 
-      // If a newer request started while we were working, abort before generating/printing results
+  // Persist last source language for UI rendering (e.g., Romaji/Pinyin labels)
+  this.lastSourceLang = actualSourceLang || detectedLang || 'auto';
+
+  // If a newer request started while we were working, abort before generating/printing results
       if (requestId !== this.activeRequestId) {
         console.log('⏭️ Skipping work for stale request (pre-learning-content).');
         return;
@@ -875,9 +756,58 @@ class PolyglotReader {
       // Get learning content based on focus
       let learningContent = '';
       if (learningFocus !== 'translate') {
+        // Special case: Vocabulary should render immediately and then stream in concurrently
+        if (learningFocus === 'vocabulary') {
+          // Render skeleton immediately without nested section wrapper/title
+          learningContent = `
+            <div id="pg-vocab-live">
+              <div class="polyglot-loading" style="margin:8px 0;">
+                <div class="polyglot-spinner"></div>
+                Finding key words…
+              </div>
+            </div>`;
+
+          // If a newer request started while we were working, abort before rendering
+          if (requestId !== this.activeRequestId) {
+            console.log('⏭️ Skipping vocab skeleton render for stale request.');
+            return;
+          }
+
+          // Display skeleton now, then start live pipeline and return early
+          this.displayResults(text, translation, pronunciation, actualSourceLang, actualTargetLang, learningContent, learningFocus, requestId);
+
+          // Fire-and-forget live vocabulary pipeline
+          this.startVocabularyLive(text, actualSourceLang, actualTargetLang, requestId).catch(err => {
+            console.log('⚠️ Live vocabulary pipeline failed, falling back:', err?.message || err);
+            // As a fallback, attempt the old single-shot vocabulary generation (won't be concurrent)
+            (async () => {
+              try {
+                const fallback = await this.getLearningContent(text, actualTargetLang, 'vocabulary', actualSourceLang);
+                if (requestId !== this.activeRequestId) return;
+                const container = this.tooltip.querySelector('#pg-vocab-live');
+                if (container) container.innerHTML = String(fallback || '');
+              } catch (_) { /* ignore */ }
+            })();
+          });
+
+          return; // We already rendered and started the pipeline
+        }
+
+        // Default path for other learning modes
         console.log(`🎯 Getting learning content for focus: ${learningFocus}`);
-        learningContent = await this.getLearningContent(text, actualTargetLang, learningFocus);
-        console.log(`📝 Learning content generated (${learningContent.length} chars):`, learningContent.substring(0, 100) + '...');
+        learningContent = await this.getLearningContent(text, actualTargetLang, learningFocus, actualSourceLang);
+        // Log safely for both string and object payloads (e.g., summary returns { original, translated })
+        if (learningFocus === 'summary' && learningContent && typeof learningContent === 'object') {
+          const orig = String(learningContent.original || '');
+          const trans = String(learningContent.translated || '');
+          console.log(
+            `📝 Summary content generated (orig ${orig.length} chars, trans ${trans.length} chars):`,
+            orig.substring(0, 100) + '...'
+          );
+        } else {
+          const asStr = String(learningContent || '');
+          console.log(`📝 Learning content generated (${asStr.length} chars):`, asStr.substring(0, 100) + '...');
+        }
       }
 
       // If a newer request started while we were working, abort rendering
@@ -896,6 +826,188 @@ class PolyglotReader {
           Error processing text. Chrome AI APIs may not be available.
         </div>
       `;
+    }
+  }
+
+  /**
+   * Start a concurrent, incremental vocabulary pipeline:
+   * 1) Quickly get seed words (word + pos) as JSON and render immediately
+   * 2) Fetch per-word details concurrently and update each card as it completes
+   */
+  async startVocabularyLive(text, sourceLang, targetLang, requestId) {
+    try {
+      if (requestId !== this.activeRequestId) return; // stale guard
+      const liveSessions = window.PG?.ai?.getSessions();
+      if (!liveSessions?.languageModel) throw new Error('Language Model not available');
+      // Proactively warm up all AI APIs to ensure they are used in vocabulary mode
+      try {
+        // Fire-and-forget; do not block UI
+        window.PG?.ai?.ensureWriterReady?.();
+        window.PG?.ai?.ensureRewriterReady?.();
+        window.PG?.ai?.ensureProofreaderReady?.();
+        window.PG?.ai?.ensureSummarizerReady?.();
+        // Translator requires a pair; use detected source/target
+        window.PG?.ai?.ensureTranslatorReady?.(targetLang, sourceLang);
+      } catch (_) { /* ignore */ }
+
+      const container = this.tooltip.querySelector('#pg-vocab-live');
+      if (!container) throw new Error('Vocabulary container not found');
+
+      const isLong = text.length > (this.settings.maxVocabularyChars || 400);
+      const sample = isLong ? text.slice(0, this.settings.maxVocabularyChars) : text;
+      const maxItems = this.settings.vocabMaxItems || 12;
+      const langCode = this.getLanguageCode(targetLang);
+
+      // Phase 1: Seed words (fast)
+      const seedPrompt = `Return ONLY a JSON array (no prose) of up to ${maxItems} items with keys: word, pos.
+Identify the most important distinct words to learn from the text below (skip stopwords). Use the original script for the source language.
+Text: """${sample}"""`;
+
+      let seeds = [];
+      try {
+        const raw = await liveSessions.languageModel.prompt(seedPrompt, { language: langCode });
+        const clean = String(raw || '').trim().replace(/^```json\s*|^```|```$/g, '').trim();
+        const arr = JSON.parse(clean);
+        if (Array.isArray(arr)) {
+          seeds = arr
+            .filter(it => it && typeof it === 'object' && String(it.word || '').trim())
+            .slice(0, maxItems)
+            .map((it) => ({
+              word: String(it.word || '').trim(),
+              pos: String(it.pos || '').trim(),
+              def: '', example: '', reading: '', transliteration: '', pronunciation: '',
+              difficulty: '', frequency: ''
+            }));
+        }
+      } catch (e) {
+        console.log('Seed extraction failed:', e?.message || e);
+      }
+
+      if (!seeds.length) throw new Error('No seeds produced');
+
+      // Render initial cards immediately
+      this.lastVocabItems = seeds.slice();
+      if (requestId !== this.activeRequestId) return;
+      container.innerHTML = this.renderVocabItems(seeds);
+
+      // Phase 2: Per-word details concurrently
+      const concurrency = Math.max(1, Math.min(this.settings.vocabEnrichConcurrency || 3, 6));
+      let active = 0;
+      const queue = seeds.map((_, i) => i);
+
+      const runOne = async (idx) => {
+        const item = this.lastVocabItems[idx];
+        if (!item || requestId !== this.activeRequestId) return;
+  const detailPrompt = `For the single word below, return ONLY a JSON object with these keys:
+word, pos, definition, reading, transliteration, pronunciation, stress, CEFR, frequency, register, family, synonyms, antonyms, collocations, etymology, cultural, regionalVariation
+
+Constraints:
+- Values must be concise, single-line strings (synonyms/collocations may be comma-separated).
+- All pronunciation-related fields are for the SOURCE LANGUAGE ONLY.
+- Do NOT include labels like "English:" or any other language names.
+
+Word: ${item.word}
+Text context: """${sample}"""`;
+        try {
+          const raw = await liveSessions.languageModel.prompt(detailPrompt, { language: langCode });
+          const clean = String(raw || '').trim().replace(/^```json\s*|^```|```$/g, '').trim();
+          const obj = JSON.parse(clean);
+          const updated = {
+            ...item,
+            pos: String(obj.pos ?? item.pos ?? '').trim(),
+            def: String(obj.def ?? obj.definition ?? item.def ?? '').trim(),
+            example: String(obj.example ?? item.example ?? '').trim(),
+            reading: String(obj.reading ?? '').trim(),
+            transliteration: String(obj.transliteration ?? obj.romaji ?? obj.pinyin ?? '').trim(),
+            pronunciation: String(obj.pronunciation ?? obj.pron ?? '').trim(),
+            stress: String(obj.stress ?? '').trim(),
+            cefr: String(obj.cefr ?? '').trim().toUpperCase(),
+            synonyms: Array.isArray(obj.synonyms) ? obj.synonyms.join(', ') : String(obj.synonyms ?? '').trim(),
+            antonyms: Array.isArray(obj.antonyms) ? obj.antonyms.join(', ') : String(obj.antonyms ?? '').trim(),
+            polysemy: String(obj.polysemy ?? obj.senses ?? '').trim(),
+            collocations: Array.isArray(obj.collocations) ? obj.collocations.join(', ') : String(obj.collocations ?? '').trim(),
+            register: String(obj.register ?? '').trim(),
+            domain: String(obj.domain ?? '').trim(),
+            commonErrors: String(obj.commonErrors ?? '').trim(),
+            idioms: Array.isArray(obj.idioms) ? obj.idioms.join(', ') : String(obj.idioms ?? '').trim(),
+            family: String(obj.family ?? '').trim(),
+            etymology: String(obj.etymology ?? '').trim(),
+            semanticField: String(obj.semanticField ?? '').trim(),
+            falseFriends: Array.isArray(obj.falseFriends) ? obj.falseFriends.join(', ') : String(obj.falseFriends ?? '').trim(),
+            visuals: String(obj.visuals ?? '').trim(),
+            mnemonics: String(obj.mnemonics ?? '').trim(),
+            cultural: String(obj.cultural ?? '').trim(),
+            appropriateness: String(obj.appropriateness ?? '').trim(),
+            regionalVariation: String(obj.regionalVariation ?? '').trim(),
+            sensitivity: String(obj.sensitivity ?? '').trim(),
+            frequency: String(obj.frequency ?? '').trim()
+          };
+          // Sanitize pronunciation fields to keep only source-language info
+          const [sanitized] = this.sanitizeVocabPronunciation([updated], sourceLang);
+          this.lastVocabItems[idx] = sanitized;
+          if (requestId !== this.activeRequestId) return;
+          // Update just this card in the UI
+          const analysis = container.querySelector('.polyglot-vocabulary-analysis');
+          const card = analysis?.querySelector(`.word-card[data-idx="${idx}"]`);
+          if (card) {
+            const tmp = document.createElement('div');
+            tmp.innerHTML = this.renderVocabItems([sanitized]);
+            const newCard = tmp.querySelector('.word-card');
+            if (newCard) {
+              card.innerHTML = newCard.innerHTML;
+              // Ensure the index badge remains correct
+              const badge = card.querySelector('.word-index');
+              if (badge) badge.textContent = String(idx + 1);
+            }
+          } else {
+            // If structure changed, re-render all as a safe fallback
+            container.innerHTML = this.renderVocabItems(this.lastVocabItems);
+          }
+        } catch (e) {
+          console.log(`Detail fetch failed for "${item.word}":`, e?.message || e);
+        }
+      };
+
+      const pump = () => new Promise((resolve) => {
+        const next = () => {
+          if (requestId !== this.activeRequestId) return resolve();
+          if (!queue.length && active === 0) return resolve();
+          while (active < concurrency && queue.length) {
+            const idx = queue.shift();
+            active++;
+            runOne(idx).finally(() => {
+              active--;
+              next();
+            });
+          }
+        };
+        next();
+      });
+
+      await pump();
+
+      // Only enrich if items are missing critical fields (examples, definitions, etc.)
+      const needsEnrichment = this.lastVocabItems.some(item => 
+        (!item.example || item.example.length < 4) || 
+        (!item.def || item.def.length < 3) ||
+        (!item.transliteration && this.needsTransliteration(sourceLang))
+      );
+      
+      if (needsEnrichment) {
+        console.log(`🔧 Enriching vocabulary items (${this.lastVocabItems.filter(item => !item.example || item.example.length < 4).length} missing examples)`);
+        try {
+          const enriched = await this.enrichVocabularyItems(this.lastVocabItems.slice(0), { sourceLang, targetLang, strategy: this.settings?.vocabStrategy || 'adaptive' });
+          if (requestId === this.activeRequestId) {
+            this.lastVocabItems = enriched;
+            container.innerHTML = this.renderVocabItems(enriched);
+          }
+        } catch (_) { /* ignore */ }
+      } else {
+        console.log(`✅ Skipping enrichment - all vocabulary items already have adequate examples and definitions`);
+      }
+    } catch (err) {
+      console.log('Live vocabulary pipeline error:', err?.message || err);
+      // Leave skeleton; fallback will be attempted by caller if provided
     }
   }
 
@@ -985,93 +1097,132 @@ class PolyglotReader {
     return combined || text;
   }
 
-  detectLanguageFallback(text) {
-    // Simple character-based language detection fallback
-    const sample = text.substring(0, 100); // Check first 100 characters
-    
-    // Japanese detection (Hiragana, Katakana, Kanji)
-    if (/[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]/.test(sample)) {
-      return 'ja';
-    }
-    
-    // Chinese detection (Chinese characters, but not Japanese context)
-    if (/[\u4E00-\u9FAF]/.test(sample) && !/[\u3040-\u309F\u30A0-\u30FF]/.test(sample)) {
-      return 'zh';
-    }
-    
-    // Korean detection (Hangul)
-    if (/[\uAC00-\uD7AF\u1100-\u11FF\u3130-\u318F]/.test(sample)) {
-      return 'ko';
-    }
-    
-    // Arabic detection
-    if (/[\u0600-\u06FF\u0750-\u077F]/.test(sample)) {
-      return 'ar';
-    }
-    
-    // Russian detection (Cyrillic)
-    if (/[\u0400-\u04FF]/.test(sample)) {
-      return 'ru';
-    }
-    
-    // Spanish detection (common Spanish words and accents)
-    if (/[ñáéíóúü]/.test(sample.toLowerCase()) || 
-        /\b(el|la|los|las|de|del|que|en|un|una|es|se|no|te|lo|le|da|su|por|son|con|para|al|todo|pero|más|hacer|muy|aquí|sido|está|hasta|donde)\b/.test(sample.toLowerCase())) {
-      return 'es';
-    }
-    
-    // French detection (common French words and accents)
-    if (/[àâäéèêëïîôùûüÿç]/.test(sample.toLowerCase()) || 
-        /\b(le|la|les|de|des|du|et|en|un|une|il|elle|est|sont|avec|pour|par|sur|dans|mais|plus|tout|vous|nous|ils|elles|ce|cette|qui|que)\b/.test(sample.toLowerCase())) {
-      return 'fr';
-    }
-    
-    // German detection (common German words and characters)
-    if (/[äöüß]/.test(sample.toLowerCase()) || 
-        /\b(der|die|das|den|dem|des|ein|eine|einen|einem|eines|und|in|zu|mit|auf|für|von|an|bei|nach|über|unter|durch|gegen|ohne|um|vor|hinter|neben)\b/.test(sample.toLowerCase())) {
-      return 'de';
-    }
-    
-    // Default to English if no other language detected
-    return 'en';
-  }
+  detectLanguageFallback(text) { return window.PG?.lang?.detectLanguageFallback(text); }
 
-  getLanguageCode(lang) {
-    // Map language codes to supported output languages for Language Model
-    const languageMap = {
-      'en': 'en',
-      'es': 'es', 
-      'ja': 'ja',
-      'fr': 'en', // Fallback to English for unsupported languages
-      'de': 'en',
-      'it': 'en',
-      'pt': 'en',
-      'ru': 'en',
-      'zh': 'en',
-      'ko': 'en',
-      'ar': 'en',
-      'hi': 'en'
-    };
-    return languageMap[lang] || 'en';
-  }
+  getLanguageCode(lang) { return window.PG?.lang?.getLanguageCode(lang); }
 
-  async getLearningContent(text, targetLang, focus) {
+  // Condense a summary to be short and learner-friendly
+  condenseSummary(text, options = {}) { return window.PG?.vocab?.condenseSummary(text, options); }
+
+  async getLearningContent(text, targetLang, focus, sourceLang) {
     try {
       const langCode = this.getLanguageCode(targetLang);
       let prompt = '';
       let usedCompact = false; // track if we use compact JSON prompt for vocabulary
+      // Hoisted strategy for vocabulary so it is available across execution paths
+      let strategy;
       
       switch (focus) {
+        case 'summary':
+          console.log(`📄 Summary analysis requested for: "${text}"`);
+          // Ensure summarizer session (may require user gesture)
+          const sessions = window.PG?.ai?.getSessions();
+          if (!sessions?.summarizer) {
+            await window.PG?.ai?.ensureSummarizerReady?.();
+          }
+          if (sessions?.summarizer) {
+            try {
+              console.log('🔍 Creating summary');
+              const cacheKey = `summary|${targetLang}|${sourceLang}|${text}`;
+              if (this.learningCache.has(cacheKey)) {
+                console.log('🗃️ Cache hit for summary');
+                return this.learningCache.get(cacheKey);
+              }
+              
+              if (this.inFlightLearning.has(cacheKey)) {
+                console.log('🛫 Awaiting in-flight summary');
+                try { return await this.inFlightLearning.get(cacheKey); } catch (e) { /* fallthrough */ }
+              }
+              
+              const summaryPromise = (async () => {
+                const result = await sessions.summarizer.summarize(text);
+                const rawSummary = result?.summary || result || 'Summary not available';
+
+                // Condense the summary to a short, learner-friendly size
+                const condensed = this.condenseSummary(rawSummary, { maxBullets: 5, maxSentences: 3, charCap: 500 });
+
+                // Detect the language of the condensed summary and enforce source-language for Original Summary
+                let summaryLang = null;
+                try {
+                  if (sessions?.languageDetector?.detect) {
+                    const det = await sessions.languageDetector.detect(condensed);
+                    const arr = Array.isArray(det) ? det : [det];
+                    if (arr.length && (arr[0]?.detectedLanguage || arr[0])) {
+                      summaryLang = arr[0].detectedLanguage || arr[0];
+                    }
+                  }
+                } catch (_) { /* ignore */ }
+                if (!summaryLang) summaryLang = this.detectLanguageFallback(condensed);
+
+                // Prepare original summary text (in source language when known)
+                let summaryForOriginal = condensed;
+                try {
+                  if (sourceLang && sourceLang !== 'auto' && summaryLang && summaryLang !== sourceLang) {
+                    const toSource = await window.PG?.ai?.ensureTranslatorReady?.(sourceLang, summaryLang);
+                    if (toSource) {
+                      const trSrc = await toSource.translate(condensed);
+                      summaryForOriginal = trSrc?.translatedText || trSrc || condensed;
+                    }
+                  }
+                } catch (e) {
+                  console.log('⚠️ Could not translate summary back to source language:', e?.message || e);
+                }
+
+                // Build Original Summary HTML
+                const originalBody = summaryForOriginal
+                  .split('\n')
+                  .map(line => line.trim() ? `<p>${line}</p>` : '')
+                  .join('');
+
+                // Prepare Translated Summary (to target language)
+                let translatedBody = originalBody;
+                try {
+                  if (targetLang && sourceLang && sourceLang !== 'auto' && targetLang !== sourceLang) {
+                    const toTarget = await window.PG?.ai?.ensureTranslatorReady?.(targetLang, sourceLang);
+                    if (toTarget) {
+                      const trTgt = await toTarget.translate(summaryForOriginal);
+                      const translatedText = trTgt?.translatedText || trTgt || summaryForOriginal;
+                      translatedBody = translatedText
+                        .split('\n')
+                        .map(line => line.trim() ? `<p>${line}</p>` : '')
+                        .join('');
+                    }
+                  }
+                } catch (e) {
+                  console.log('⚠️ Summary translation to target skipped due to error:', e?.message || e);
+                }
+
+                const payload = { original: originalBody, translated: translatedBody };
+                this.learningCache.set(cacheKey, payload);
+                return payload;
+              })();
+              
+              this.inFlightLearning.set(cacheKey, summaryPromise);
+              const result = await summaryPromise;
+              this.inFlightLearning.delete(cacheKey);
+              return result;
+              
+            } catch (error) {
+              console.error('Summarizer failed:', error);
+              throw error;
+            }
+          } else {
+            console.log('❌ Summarizer not available');
+            throw new Error('Summarizer not available. Ensure user gesture occurred and your browser supports Summarizer.');
+          }
+          
         case 'vocabulary':
           console.log(`📚 Vocabulary analysis requested for: "${text}"`);
-          console.log(`🤖 Language Model available:`, !!this.aiApis.languageModel);
-          if (this.aiApis.languageModel) {
-            const strategy = this.settings.vocabStrategy || 'adaptive';
+          const languageModel = window.PG?.ai?.getSessions()?.languageModel;
+          console.log(`🤖 Language Model available:`, !!languageModel);
+          if (languageModel) {
+            strategy = this.settings.vocabStrategy || 'adaptive';
             const isLong = text.length > (this.settings.maxVocabularyChars || 400);
+            // Strategy-based prompt selection with pronunciation support
             const useCompact = (strategy === 'fast') || (strategy === 'adaptive' && isLong);
             usedCompact = useCompact;
-            // Cache key incorporates mode, language, strategy, and text
-            const cacheKey = `${focus}|${targetLang}|${useCompact ? 'compact' : 'full'}|${text}`;
+            // Cache key incorporates mode, language, strategy, source language, and text
+            const cacheKey = `${focus}|${targetLang}|${sourceLang}|${strategy}|${text}`;
             if (this.learningCache.has(cacheKey)) {
               console.log('🗃️ Cache hit for learning content');
               const cached = this.learningCache.get(cacheKey);
@@ -1089,41 +1240,81 @@ class PolyglotReader {
             if (useCompact) {
               const sample = isLong ? text.slice(0, this.settings.maxVocabularyChars) : text;
               const maxItems = this.settings.vocabMaxItems || 12;
-              // Compact JSON-only prompt. Output will be parsed/pretty-printed locally.
-              prompt = `Return ONLY a JSON array (no extra text) of up to ${maxItems} items with keys word,pos,def,example.
-Text: """${sample}"""`;
+              // Fast/Adaptive-Long: Compact JSON focusing pronunciation ONLY on the source language
+              const src = sourceLang || 'the detected language';
+              prompt = `Return ONLY a JSON array (no extra text) of up to ${maxItems} items with these keys:
+  word, pos, def, example, reading, transliteration, pronunciation, stress, cefr, synonyms, antonyms, polysemy, collocations, register, domain, commonErrors, idioms, family, etymology, semanticField, falseFriends, visuals, mnemonics, cultural, appropriateness, regionalVariation, sensitivity
+
+  Field descriptions (SOURCE LANGUAGE ONLY):
+  - word: the word in its original script (source language)
+  - pos: part of speech (noun, verb, adjective, etc.)
+  - def: clear, concise English definition
+  - example: a short sentence using the word (max 12 words)
+  - reading: native reading for the source language (e.g., hiragana for Japanese, pinyin for Chinese). Leave empty if not applicable.
+  - transliteration: Latin transliteration for the source language if the script is non-Latin (Romaji for Japanese, Pinyin for Chinese, RR for Korean). Leave empty for Latin-script languages.
+  - pronunciation: ONE concise phonetic guide for the source language ONLY.
+  - stress: show primary stress placement if applicable (e.g., ˈpho-to-graph)
+
+  Important formatting rules:
+  - DO NOT include any other languages or labels like "Chinese:", "Arabic:", "Russian:", "Korean:", or "European languages:".
+  - Each value must be plain text without language-prefixed labels. No lists. One line max per field.
+
+  Text (source language = ${src}): """${sample}"""`;
             } else {
-              // Full, detailed prompt
-              prompt = `Analyze the vocabulary in: "${text}"
+              // Detailed: Full analysis with comprehensive learning support (limit text length for speed)
+              const src = sourceLang || 'the detected language';
+              const sample = isLong ? text.slice(0, this.settings.maxVocabularyChars) : text;
+              prompt = `Analyze the vocabulary in: "${sample}"
 
-Please provide a structured vocabulary breakdown:
+Please provide a comprehensive structured vocabulary breakdown:
 
-**🔤 WORD ANALYSIS:**
+**DETAILED WORD ANALYSIS:**
 For each important word, provide:
-- Word: [word]
-- Definition: [clear, simple definition]
+- Word: [word in original script]
+- Definition: [detailed, nuanced definition with context]
 - Part of speech: [noun/verb/adjective/etc.]
 - Difficulty: [Beginner/Intermediate/Advanced]
+- Frequency: [Common/Uncommon/Rare]
+- Example: [ONE short sentence using the word - max 12 words]
+  - Pronunciation (SOURCE LANGUAGE ONLY = ${src}):
+    - reading: native reading if applicable (e.g., hiragana for Japanese, pinyin for Chinese). Leave empty if not applicable.
+    - transliteration: Latin transliteration if the source script is non-Latin (e.g., romaji/pinyin/RR). Leave empty for Latin-script languages.
+    - pronunciation: a single concise phonetic hint for the source language ONLY. No other languages, no labels.
+- Etymology: word origin and historical development
+- Word family: related terms, derivatives, compounds
+- Register: formal/informal/academic/colloquial usage
+- Cultural context: cultural significance if relevant
 
-**📊 LANGUAGE LEVEL:**
-- Overall text difficulty: [assessment]
+**COMPREHENSIVE LANGUAGE ANALYSIS:**
+- Overall text difficulty: [detailed assessment]
 - Academic vs conversational style
 - Formal vs informal register
+- Genre and text type analysis
+- Cultural and contextual background
 
-**🎯 KEY VOCABULARY HIGHLIGHTS:**
-- Most important words to learn
-- Words with multiple meanings
-- Context-specific usage
+**ADVANCED VOCABULARY HIGHLIGHTS:**
+- Most important words for comprehension
+- Words with multiple meanings and contexts
+- False friends and common mistakes
+- Stylistic and register variations
+- Technical or domain-specific terminology
 
-**💡 LEARNING TIPS:**
-- Word families and related terms
-- Common collocations
-- Memory aids or patterns
+**DETAILED LEARNING STRATEGIES:**
+- Mnemonic devices and memory aids
+- Word association techniques
+- Common collocations and phrases
+- Grammatical patterns and usage rules
+- Cross-linguistic comparisons
 
-**📝 EXAMPLE SENTENCES:**
-Provide 2-3 simple example sentences using key vocabulary.
+**CONTEXTUAL EXAMPLES:**
+Provide 1-2 SHORT example sentences (max 15 words each) showing basic usage.
 
-Format with clear headings and bullet points. Keep explanations concise but helpful. Respond in ${targetLang === 'en' ? 'English' : targetLang}.`;
+**CULTURAL AND PRAGMATIC NOTES:**
+- Social and cultural usage contexts
+- Politeness levels and formality
+- Regional variations if applicable
+
+Format with clear headings, bullet points, and detailed explanations. Provide comprehensive learning support. Respond in ${targetLang === 'en' ? 'English' : targetLang}.`;
             }
             console.log(`📝 Vocabulary prompt created, length: ${prompt.length}`);
           } else {
@@ -1132,9 +1323,10 @@ Format with clear headings and bullet points. Keep explanations concise but help
           break;
           
         case 'grammar':
-          if (this.aiApis.proofreader) {
+          const grammarSessions = window.PG?.ai?.getSessions();
+          if (grammarSessions?.proofreader) {
             try {
-              const result = await this.aiApis.proofreader.proofread(text);
+              const result = await grammarSessions.proofreader.proofread(text);
               if (result.suggestions || result) {
                 return `🔍 **Grammar Analysis:**\n\n${result.suggestions || result}`;
               }
@@ -1143,7 +1335,7 @@ Format with clear headings and bullet points. Keep explanations concise but help
             }
           }
           
-          if (this.aiApis.languageModel) {
+          if (grammarSessions?.languageModel) {
             prompt = `Analyze the grammar of "${text}" in detail. Provide:
 
 🏗️ **Grammatical Structure:**
@@ -1173,7 +1365,8 @@ Format as clear sections with emojis. Respond in ${targetLang}.`;
           break;
           
         case 'verbs':
-          if (this.aiApis.languageModel) {
+          const verbsSessions = window.PG?.ai?.getSessions();
+          if (verbsSessions?.languageModel) {
             prompt = `Analyze all verbs in "${text}" comprehensively. Provide:
 
 ⚡ **Verb Identification:**
@@ -1212,21 +1405,28 @@ Format as clear sections with emojis. Respond in ${targetLang}.`;
           return '';
       }
 
-      if (prompt && this.aiApis.languageModel) {
+      const finalSessions = window.PG?.ai?.getSessions();
+      if (prompt && finalSessions?.languageModel) {
         console.log(`🚀 Executing ${focus} prompt with Language Model...`);
         try {
           // For vocabulary, dedupe concurrent executions using inFlightLearning
           if (focus === 'vocabulary') {
-            const cacheKey = `${focus}|${targetLang}|${usedCompact ? 'compact' : 'full'}|${text}`;
+            const cacheKey = `${focus}|${targetLang}|${sourceLang}|${strategy}|${text}`;
             const execPromise = (async () => {
-              const result = await this.aiApis.languageModel.prompt(prompt, { language: langCode });
+              const result = await finalSessions.languageModel.prompt(prompt, { language: langCode });
               console.log(`✅ ${focus} analysis completed successfully, length: ${result.length}`);
               if (usedCompact) {
                 const parsed = this.parseVocabJSONToItems(result);
                 if (parsed && Array.isArray(parsed.items)) {
-                  const html = this.renderVocabItems(parsed.items);
-                  this.lastVocabItems = parsed.items;
-                  this.learningCache.set(cacheKey, { html, items: parsed.items });
+                  const sanitized = this.sanitizeVocabPronunciation(parsed.items, sourceLang);
+                  // Immediate render of sanitized items; defer enrichment to post-render if enabled
+                  const html = this.renderVocabItems(sanitized);
+                  this.lastVocabItems = sanitized;
+                  // Store plan for deferred enrichment (handled in displayResults)
+                  if (this.settings && this.settings.enrichVocab) {
+                    this.vocabEnrichmentPlan = { items: sanitized, sourceLang, targetLang, strategy, cacheKey, rawText: result };
+                  }
+                  this.learningCache.set(cacheKey, { html, items: sanitized });
                   this.learningCacheOrder.push(cacheKey);
                   if (this.learningCacheOrder.length > 30) {
                     const oldest = this.learningCacheOrder.shift();
@@ -1237,11 +1437,16 @@ Format as clear sections with emojis. Respond in ${targetLang}.`;
               }
               // Try to extract from detailed text and render rich cards + formatted analysis
               const items = this.parseVocabFromAnalysisText(result);
-              this.lastVocabItems = items;
+              const sanitized = this.sanitizeVocabPronunciation(items, sourceLang);
+              this.lastVocabItems = sanitized;
               const formatted = this.formatVocabularyAnalysis(result);
-              const cards = (items && items.length) ? this.renderVocabItems(items) : '';
+              const cards = (sanitized && sanitized.length) ? this.renderVocabItems(sanitized) : '';
               const combined = cards ? `${cards}<hr>${formatted}` : formatted;
-              this.learningCache.set(cacheKey, { html: combined, items });
+              // Store plan for deferred enrichment
+              if (this.settings && this.settings.enrichVocab) {
+                this.vocabEnrichmentPlan = { items: sanitized, sourceLang, targetLang, strategy, cacheKey, rawText: result };
+              }
+              this.learningCache.set(cacheKey, { html: combined, items: sanitized });
               this.learningCacheOrder.push(cacheKey);
               if (this.learningCacheOrder.length > 30) {
                 const oldest = this.learningCacheOrder.shift();
@@ -1259,62 +1464,13 @@ Format as clear sections with emojis. Respond in ${targetLang}.`;
           }
 
           // Non-vocabulary path (no dedupe needed)
-          const result = await this.aiApis.languageModel.prompt(prompt, { language: langCode });
+          const result = await finalSessions.languageModel.prompt(prompt, { language: langCode });
           console.log(`✅ ${focus} analysis completed successfully, length: ${result.length}`);
           return result;
         } catch (error) {
             console.error(`❌ Language model prompt failed for ${focus}:`, error);
-            // Retry with safe default language to satisfy output language requirement
-            try {
-              console.log(`🔄 Retrying ${focus} prompt with English language...`);
-              // For vocabulary, also dedupe the fallback execution
-              if (focus === 'vocabulary') {
-                const cacheKey = `${focus}|${targetLang}|${usedCompact ? 'compact' : 'full'}|${text}`;
-                const execPromise = (async () => {
-                  const result = await this.aiApis.languageModel.prompt(prompt, { language: 'en' });
-                  console.log(`✅ ${focus} analysis completed with fallback, length: ${result.length}`);
-                  if (usedCompact) {
-                    const parsed = this.parseVocabJSONToItems(result);
-                    if (parsed && Array.isArray(parsed.items)) {
-                      const html = this.renderVocabItems(parsed.items);
-                      this.lastVocabItems = parsed.items;
-                      this.learningCache.set(cacheKey, { html, items: parsed.items });
-                      this.learningCacheOrder.push(cacheKey);
-                      if (this.learningCacheOrder.length > 30) {
-                        const oldest = this.learningCacheOrder.shift();
-                        if (oldest) this.learningCache.delete(oldest);
-                      }
-                      return html;
-                    }
-                  }
-                  const items = this.parseVocabFromAnalysisText(result);
-                  this.lastVocabItems = items;
-                  const formatted = this.formatVocabularyAnalysis(result);
-                  const cards = (items && items.length) ? this.renderVocabItems(items) : '';
-                  const combined = cards ? `${cards}<hr>${formatted}` : formatted;
-                  this.learningCache.set(cacheKey, { html: combined, items });
-                  this.learningCacheOrder.push(cacheKey);
-                  if (this.learningCacheOrder.length > 30) {
-                    const oldest = this.learningCacheOrder.shift();
-                    if (oldest) this.learningCache.delete(oldest);
-                  }
-                  return combined;
-                })();
-                this.inFlightLearning.set(cacheKey, execPromise);
-                try {
-                  const out = await execPromise;
-                  return out;
-                } finally {
-                  this.inFlightLearning.delete(cacheKey);
-                }
-              }
-              const result = await this.aiApis.languageModel.prompt(prompt, { language: 'en' });
-              console.log(`✅ ${focus} analysis completed with fallback, length: ${result.length}`);
-              return result;
-            } catch (retryError) {
-              console.error(`❌ ${focus} prompt failed even with fallback:`, retryError);
-              return `${focus} analysis failed: ${retryError.message}`;
-            }
+            // No fallback per policy
+            return `${focus} analysis failed: ${error?.message || error}`;
         }
       }
       
@@ -1326,117 +1482,125 @@ Format as clear sections with emojis. Respond in ${targetLang}.`;
     }
   }
 
-  formatVocabularyAnalysis(rawAnalysis) {
-    // Enhanced formatting for vocabulary analysis
-    let formatted = rawAnalysis;
-    
-    // Convert markdown headers (##, ###) to HTML
-    formatted = formatted.replace(/^###\s+(.+)$/gm, '<h4>$1</h4>');
-    formatted = formatted.replace(/^##\s+(.+)$/gm, '<h3>$1</h3>');
-
-    // Convert markdown-style headers to HTML
-    formatted = formatted.replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>');
-    formatted = formatted.replace(/^\*\*([^:]+):\*\*/gm, '<h3>$1</h3>');
-    
-    // Format bullet points (line-by-line to avoid over-wrapping)
-    formatted = formatted.replace(/^-\s+(.*)$/gm, '<li>$1</li>');
-    // Wrap consecutive <li> blocks with <ul> using a simple pass
-    formatted = formatted.replace(/(?:<li>.*<\/li>\n?)+/g, (block) => `<ul>${block}</ul>`);
-    
-    // Format word entries (Word: Definition pattern)
-    formatted = formatted.replace(/- Word: ([^,\n]+)/g, '<div class="word-card"><div class="word-title">$1</div>');
-    formatted = formatted.replace(/- Definition: ([^\n]+)/g, '<div>Definition: $1</div>');
-    formatted = formatted.replace(/- Part of speech: ([^\n]+)/g, '<div>Part of speech: <em>$1</em></div>');
-    formatted = formatted.replace(/- Difficulty: (Beginner|Intermediate|Advanced)/g, '<span class="difficulty-badge difficulty-$1">$1</span></div>');
-    
-    // Format example sentences
-    formatted = formatted.replace(/^(\d+\.\s.*)/gm, '<div class="example-sentence">$1</div>');
-    
-    // Add learning tip styling
-    formatted = formatted.replace(/(Memory aid|Tip|Remember):\s*([^\n]+)/gi, '<div class="learning-tip">$1: $2</div>');
-    
-    // Clean up any loose formatting
-    formatted = formatted.replace(/\n\n/g, '<br><br>');
-    formatted = formatted.replace(/\n/g, '<br>');
-    
-    return formatted;
-  }
+  formatVocabularyAnalysis(rawAnalysis) { return window.PG?.vocab?.formatVocabularyAnalysis(rawAnalysis); }
 
   // Parse compact JSON vocabulary output and render quick HTML
   tryFormatVocabJSON(result) {
-    // Deprecated by parseVocabJSONToItems + renderVocabItems; kept for backward compatibility
-    const parsed = this.parseVocabJSONToItems(result);
-    if (parsed && Array.isArray(parsed.items)) {
-      return this.renderVocabItems(parsed.items);
-    }
+    const parsed = window.PG?.vocab?.parseVocabJSONToItems(result, this.settings.vocabMaxItems || 12);
+    if (parsed && Array.isArray(parsed.items)) return this.renderVocabItems(parsed.items);
     return null;
   }
 
   // Extract structured items from compact JSON output
-  parseVocabJSONToItems(result) {
-    try {
-      const clean = String(result || '').trim().replace(/^```json\s*|^```|```$/g, '').trim();
-      const data = JSON.parse(clean);
-      if (!Array.isArray(data)) return null;
-      const limit = this.settings.vocabMaxItems || 12;
-      const items = data.slice(0, limit).map(it => ({
-        word: String(it.word ?? '').trim(),
-        pos: String(it.pos ?? '').trim(),
-        def: String(it.def ?? '').trim(),
-        example: String(it.example ?? '').trim()
-      }));
-      return { items };
-    } catch (_) {
-      return null;
-    }
-  }
+  parseVocabJSONToItems(result) { return window.PG?.vocab?.parseVocabJSONToItems(result, this.settings.vocabMaxItems || 12); }
 
   // Render word cards HTML from items
-  renderVocabItems(items) {
-    const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;','\'':'&#39;'}[c]));
-    return `
-      <div class="polyglot-vocabulary-analysis">
-        ${items.map(it => `
-          <div class="word-card">
-            <div class="word-title">${esc(it.word)}</div>
-            <div>Part of speech: <em>${esc(it.pos)}</em></div>
-            <div>Definition: ${esc(it.def)}</div>
-            ${it.translation ? `<div>Translation: ${esc(it.translation)}</div>` : ''}
-            ${it.pron ? `<div>Pronunciation: <code>${esc(it.pron)}</code></div>` : ''}
-            ${it.cefr ? `<div>Level: ${esc(it.cefr)}</div>` : ''}
-            ${it.frequency ? `<div>Frequency: ${esc(it.frequency)}</div>` : ''}
-            ${it.family ? `<div>Word family: ${esc(it.family)}</div>` : ''}
-            ${it.synonyms ? `<div>Synonyms: ${esc(it.synonyms)}</div>` : ''}
-            ${it.collocations ? `<div>Collocations: ${esc(it.collocations)}</div>` : ''}
-            ${it.example ? `<div class="example-sentence">• ${esc(it.example)}</div>` : ''}
-          </div>
-        `).join('')}
-      </div>
-    `;
+  renderVocabItems(items) { return window.PG?.vocab?.renderVocabItems(items, this.lastSourceLang || 'auto'); }
+
+  // Keep only source-language pronunciation; strip cross-language labeled lines
+  sanitizeVocabPronunciation(items, sourceLang) { return window.PG?.vocab?.sanitizeVocabPronunciation(items, sourceLang); }
+
+  // Truncate overly long examples to max 2 sentences, 120 characters
+  truncateExample(example) {
+    if (!example || example.length <= 120) return example;
+    // Split by sentence boundaries and take first 1-2 sentences
+    const sentences = example.split(/[.!?。！？]+/).map(s => s.trim()).filter(Boolean);
+    if (sentences.length > 0) {
+      const short = sentences.slice(0, 2).join('. ');
+      if (short.length <= 120) {
+        return short + (short.match(/[.!?。！？]$/) ? '' : '.');
+      } else {
+        // Even 2 sentences are too long, take just the first one
+        return sentences[0] + (sentences[0].match(/[.!?。！？]$/) ? '' : '.');
+      }
+    }
+    return example;
+  }
+
+  // Check if source language typically needs transliteration
+  needsTransliteration(sourceLang) {
+    if (!sourceLang || sourceLang === 'auto') return false;
+    const lang = sourceLang.toLowerCase();
+    // Languages that typically use non-Latin scripts
+    return ['zh', 'ja', 'ko', 'ar', 'he', 'ru', 'th', 'hi', 'bn', 'ta', 'te', 'mr', 'gu', 'kn', 'ml', 'or', 'pa', 'ur', 'fa', 'ne', 'si'].includes(lang);
   }
 
   // Best-effort parser for detailed analysis text to extract items
   parseVocabFromAnalysisText(text) {
     try {
-      const items = [];
-      const blocks = String(text || '').split(/\n\n|---/);
-      for (const b of blocks) {
-        const word = /-\s*Word:\s*([^\n]+)/i.exec(b)?.[1]?.trim();
+      const out = [];
+      const txt = String(text || '').replace(/\r\n?/g, '\n');
+      // Split by double newlines or by numbered sections like "\n1. "
+      const rawBlocks = txt.split(/\n{2,}|(?=^\d+\.\s)/gm).map(b => b.trim()).filter(Boolean);
+      for (let b of rawBlocks) {
+        // Try numbered style: "1. Word (transliteration)" as the first line
+        const lines = b.split(/\n/).map(l => l.trim()).filter(Boolean);
+        if (!lines.length) continue;
+        let word = '';
+        let translitFromTitle = '';
+        const titleMatch = lines[0].match(/^\d+\.\s*(.+)$/);
+        if (titleMatch) {
+          const t = titleMatch[1].trim();
+          const m = t.match(/^(.+?)\s*\(([^\)]+)\)/);
+          if (m) {
+            word = m[1].trim();
+            translitFromTitle = m[2].trim();
+          } else {
+            word = t;
+          }
+        }
+        // Fallback to "- Word: ..." style
+        if (!word) {
+          word = /-\s*Word:\s*([^\n]+)/i.exec(b)?.[1]?.trim() || '';
+        }
         if (!word) continue;
-        const def = /-\s*Definition:\s*([^\n]+)/i.exec(b)?.[1]?.trim() || '';
-        const pos = /-\s*Part of speech:\s*([^\n]+)/i.exec(b)?.[1]?.trim() || '';
-        const pron = /-\s*Pronunciation:\s*([^\n]+)/i.exec(b)?.[1]?.trim() || '';
-        const trans = /-\s*Translation:\s*([^\n]+)/i.exec(b)?.[1]?.trim() || '';
-        const cefr = /-\s*(CEFR|Level):\s*([^\n]+)/i.exec(b)?.[2]?.trim() || '';
-        const freq = /-\s*Frequency:\s*([^\n]+)/i.exec(b)?.[1]?.trim() || '';
-        const family = /-\s*(Word\s*family|Related\s*terms):\s*([^\n]+)/i.exec(b)?.[2]?.trim() || '';
-        const synonyms = /-\s*Synonyms?:\s*([^\n]+)/i.exec(b)?.[1]?.trim() || '';
-        const collocs = /-\s*Collocations?:\s*([^\n]+)/i.exec(b)?.[1]?.trim() || '';
-        // Try to find an example line (numbered or bullet)
-        const ex = /(\d+\.\s+[^\n]+|•\s+[^\n]+|-\s+[^\n]+)/.exec(b)?.[0]?.replace(/^\d+\.\s*|^•\s*|^-\s*/,'').trim() || '';
-        items.push({ word, pos, def, example: ex, pron, translation: trans, cefr, frequency: freq, family, synonyms, collocations: collocs });
+
+        const get = (label) => new RegExp(`^${label}:\\s*([^\\n]+)`, 'im').exec(b)?.[1]?.trim() || '';
+        const def = get('Definition');
+        const pos = get('Part of speech');
+        const difficulty = get('Difficulty');
+        const frequency = get('Frequency');
+        const pron = get('Pronunciation');
+        const family = get('Word family');
+        const register = get('Register');
+        const cultural = get('Cultural context');
+        const etym = get('Etymology');
+        const synonyms = get('Synonyms?');
+        const collocs = get('Collocations?');
+        const cefr = get('Level') || get('CEFR');
+        // Example: try numbered/bullet lines (skip the title line) but prefer shorter ones
+        let ex = '';
+        for (let i = 1; i < lines.length; i++) {
+          const m = lines[i].match(/^(?:\d+\.\s+|•\s+|-\s+)(.+)$/);
+          if (m) { 
+            const candidate = m[1].trim(); 
+            // Prefer shorter examples (max 120 chars) or use first one if none are short
+            if (candidate.length <= 120 || !ex) {
+              ex = candidate;
+              if (candidate.length <= 120) break; // Found a good short one, use it
+            }
+          }
+        }
+
+        out.push({
+          word,
+          pos,
+          def,
+          example: ex ? this.truncateExample(ex) : ex,
+          pronunciation: pron,
+          transliteration: translitFromTitle,
+          difficulty,
+          frequency,
+          family,
+          register,
+          cultural,
+          etymology: etym,
+          cefr,
+          synonyms,
+          collocations: collocs
+        });
       }
-      return items.slice(0, this.settings.vocabMaxItems || 12);
+      return out.slice(0, this.settings.vocabMaxItems || 12);
     } catch {
       return [];
     }
@@ -1465,6 +1629,7 @@ Format as clear sections with emojis. Respond in ${targetLang}.`;
     try {
       if (!Array.isArray(this.lastVocabItems) || this.lastVocabItems.length === 0) {
         console.log('No vocabulary items available to save.');
+        this.showToast && this.showToast('No vocabulary items to save', 'warn');
         return;
       }
       // Deduplicate by word+pos
@@ -1481,14 +1646,17 @@ Format as clear sections with emojis. Respond in ${targetLang}.`;
       }
       await this.saveVocabList();
       console.log(`✅ Saved ${added} new item(s) to local vocabulary list (total: ${this.vocabularyList.length}).`);
+      this.showToast && this.showToast(added ? `Saved ${added} word${added>1?'s':''}` : 'No new words to save', added ? 'success' : 'info');
     } catch (e) {
       console.error('Failed to save vocabulary:', e);
+      this.showToast && this.showToast('Failed to save words', 'error');
     }
   }
 
   exportVocabularyAsCSV(items = this.lastVocabItems) {
     if (!Array.isArray(items) || items.length === 0) {
       console.log('No vocabulary items to export as CSV.');
+      this.showToast && this.showToast('No items to export', 'warn');
       return;
     }
     const esc = (s) => '"' + String(s ?? '').replace(/"/g, '""') + '"';
@@ -1498,17 +1666,20 @@ Format as clear sections with emojis. Respond in ${targetLang}.`;
       .join('\r\n');
     const blob = new Blob([rows], { type: 'text/csv;charset=utf-8' });
     this.triggerDownload(`vocabulary_${Date.now()}.csv`, blob);
+    this.showToast && this.showToast(`Exported ${items.length} item${items.length>1?'s':''} to CSV`, 'success');
   }
 
   exportVocabularyAsTSVForAnki(items = this.lastVocabItems) {
     if (!Array.isArray(items) || items.length === 0) {
       console.log('No vocabulary items to export as TSV.');
+      this.showToast && this.showToast('No items to export', 'warn');
       return;
     }
     // Anki-friendly TSV without header; fields: Word\tDefinition (POS)\tExample
     const rows = items.map(it => [it.word, `${it.def}${it.pos ? ` (${it.pos})` : ''}`, it.example].join('\t')).join('\r\n');
     const blob = new Blob([rows], { type: 'text/tab-separated-values;charset=utf-8' });
     this.triggerDownload(`vocabulary_anki_${Date.now()}.tsv`, blob);
+    this.showToast && this.showToast(`Exported ${items.length} item${items.length>1?'s':''} to Anki TSV`, 'success');
   }
 
   triggerDownload(filename, blob) {
@@ -1522,6 +1693,41 @@ Format as clear sections with emojis. Respond in ${targetLang}.`;
       document.body.removeChild(a);
       URL.revokeObjectURL(url);
     }, 0);
+  }
+
+  // Lightweight toast notification inside the tooltip
+  showToast(message, type = 'info') {
+    try {
+      if (!this.tooltip) return;
+      // Remove any existing toast
+      const existing = this.tooltip.querySelector('.polyglot-toast');
+      if (existing) existing.remove();
+
+      const toast = document.createElement('div');
+      toast.className = 'polyglot-toast';
+      toast.textContent = message;
+      const colors = { info: '#2563eb', success: '#16a34a', warn: '#d97706', error: '#dc2626' };
+      Object.assign(toast.style, {
+        position: 'relative',
+        marginTop: '10px',
+        padding: '8px 12px',
+        borderRadius: '8px',
+        background: colors[type] || colors.info,
+        color: '#fff',
+        fontSize: '12px',
+        boxShadow: '0 6px 12px rgba(0,0,0,0.15)',
+        opacity: '0',
+        transition: 'opacity 150ms ease',
+      });
+
+      const container = this.tooltip.querySelector('.polyglot-learning-content') || this.tooltip.querySelector('.polyglot-tooltip-content') || this.tooltip;
+      container.appendChild(toast);
+      requestAnimationFrame(() => { toast.style.opacity = '1'; });
+      setTimeout(() => {
+        toast.style.opacity = '0';
+        setTimeout(() => toast.remove(), 180);
+      }, 2000);
+    } catch (_) { /* ignore */ }
   }
 
   displayResults(originalText, translation, pronunciation, sourceLang, targetLang, learningContent, learningFocus, requestId) {
@@ -1538,7 +1744,9 @@ Format as clear sections with emojis. Respond in ${targetLang}.`;
       'ja': 'Japanese', 'ko': 'Korean', 'ar': 'Arabic', 'hi': 'Hindi', 'auto': 'Detected'
     };
 
-    let html = '';
+  let html = '';
+  const safeOriginal = this.escapeHTML(originalText);
+  const safeTranslation = this.escapeHTML(translation);
     
     // Always show original text
     html += `
@@ -1546,13 +1754,13 @@ Format as clear sections with emojis. Respond in ${targetLang}.`;
         <div class="polyglot-content-column">
           <div class="polyglot-original-text polyglot-fade-in">
             <div class="label">Original Text (${langNames[sourceLang] || sourceLang})</div>
-            <div class="text">${originalText}</div>
+            <div class="text">${safeOriginal}</div>
           </div>
         </div>
     `;
     
-    // Only show translation if learning focus is 'translate'
-    if (learningFocus === 'translate') {
+  // Show a second column for translate and summary modes
+  if (learningFocus === 'translate') {
       html += `
         <div class="polyglot-content-column">
           <div class="polyglot-translation-section polyglot-fade-in">
@@ -1563,15 +1771,38 @@ Format as clear sections with emojis. Respond in ${targetLang}.`;
               Translation
             </div>
             <div class="polyglot-translation">
-              <div class="polyglot-translation-text">${translation}</div>
+              <div class="polyglot-translation-text">${safeTranslation}</div>
               ${pronunciation ? `<div class="polyglot-pronunciation">[${pronunciation}]</div>` : ''}
               <div class="polyglot-language-info">${langNames[targetLang] || targetLang}</div>
             </div>
           </div>
         </div>
       `;
-    } else {
-      // For learning modes, show a placeholder or leave empty
+    } else if (learningFocus === 'summary') {
+      html += `
+        <div class="polyglot-content-column">
+          <div class="polyglot-summary-section polyglot-fade-in">
+            <div class="polyglot-section-title">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+              </svg>
+              Summary
+            </div>
+            <div class="polyglot-summary-content">
+              <div class="polyglot-summary-original">
+                <div class="polyglot-subtitle">Original Summary</div>
+                ${learningContent?.original || learningContent || '<em>Generating summary…</em>'}
+              </div>
+              <div class="polyglot-summary-translation" style="margin-top:12px;">
+                <div class="polyglot-subtitle">Translated Summary (${langNames[targetLang] || targetLang})</div>
+                ${learningContent?.translated || learningContent || ''}
+              </div>
+            </div>
+          </div>
+        </div>
+      `;
+    } else if (learningFocus !== 'vocabulary') {
+      // For other learning modes, show a placeholder or leave empty
       html += `
         <div class="polyglot-content-column">
           <div class="polyglot-learning-mode-indicator polyglot-fade-in">
@@ -1589,7 +1820,8 @@ Format as clear sections with emojis. Respond in ${targetLang}.`;
     
     html += `</div>`;
 
-    if (learningContent && learningFocus !== 'translate') {
+  // Render additional learning content panel for non-translate, non-summary modes
+  if (learningContent && learningFocus !== 'translate' && learningFocus !== 'summary') {
       console.log(`📊 Displaying ${learningFocus} content in UI (${learningContent.length} chars)`);
       html += `
         <div class="polyglot-learning-content polyglot-fade-in">
@@ -1599,7 +1831,7 @@ Format as clear sections with emojis. Respond in ${targetLang}.`;
             </svg>
             ${learningFocus.charAt(0).toUpperCase() + learningFocus.slice(1)} Analysis
           </div>
-          <div class="polyglot-${learningFocus}-analysis">
+          <div class="polyglot-learning-body polyglot-${learningFocus}-content">
             ${learningContent}
           </div>
         </div>
@@ -1607,22 +1839,21 @@ Format as clear sections with emojis. Respond in ${targetLang}.`;
       if (learningFocus === 'vocabulary') {
         html += `
           <div class="polyglot-action-buttons">
-            <button class="polyglot-button" onclick="window.__polyglotReader?.saveVocabularyToLocal()">Save Words</button>
-            <button class="polyglot-button" onclick="window.__polyglotReader?.exportVocabularyAsCSV()">Export Current CSV</button>
-            <button class="polyglot-button" onclick="window.__polyglotReader?.exportVocabularyAsTSVForAnki()">Export Current Anki (TSV)</button>
+            <button class="polyglot-button" data-action="save-words" title="Save current vocabulary items locally" aria-label="Save words">Save Words</button>
+            <button class="polyglot-button" data-action="export-csv" title="Export current vocabulary items as CSV" aria-label="Export CSV">Export Current CSV</button>
+            <button class="polyglot-button" data-action="export-anki" title="Export current vocabulary items as Anki TSV" aria-label="Export Anki TSV">Export Current Anki (TSV)</button>
           </div>
         `;
       }
-    } else {
+    } else if (learningFocus !== 'summary') {
+      // In summary mode we already render side-by-side; don't log as missing
       console.log(`ℹ️ No learning content to display: content=${!!learningContent}, focus=${learningFocus}`);
     }
 
   if (this.settings.showExamples && learningFocus === 'vocabulary') {
       html += `
         <div class="polyglot-examples polyglot-fade-in">
-          <div class="polyglot-section-title">Example Usage</div>
-          <div class="polyglot-example">The word appears in formal contexts.</div>
-          <div class="polyglot-example">Common in everyday conversation.</div>
+
         </div>
       `;
     }
@@ -1631,12 +1862,217 @@ Format as clear sections with emojis. Respond in ${targetLang}.`;
     if (learningFocus === 'translate') {
       html += `
         <div class="polyglot-action-buttons">
-          <button class="polyglot-button" onclick="navigator.clipboard.writeText('${translation}')">Copy Translation</button>
+          <button class="polyglot-button" data-action="copy-translation">Copy Translation</button>
         </div>
       `;
     }
 
     content.innerHTML = html;
+
+    // Bind action buttons for vocabulary (event delegation to avoid inline handlers)
+    if (learningFocus === 'vocabulary') {
+      const actions = content.querySelector('.polyglot-action-buttons');
+      if (actions && !actions._pgBound) {
+        actions.addEventListener('click', (ev) => {
+          const btn = ev.target.closest('button');
+          if (!btn) return;
+          const act = btn.getAttribute('data-action');
+          switch (act) {
+            case 'save-words':
+              this.saveVocabularyToLocal();
+              break;
+            case 'export-csv':
+              this.exportVocabularyAsCSV();
+              break;
+            case 'export-anki':
+              this.exportVocabularyAsTSVForAnki();
+              break;
+          }
+        });
+        actions._pgBound = true;
+      }
+
+      // Per-card actions (save/copy) — delegate from stable root
+      const vocabRoot = content.querySelector('#pg-vocab-live') || content;
+      if (vocabRoot && !vocabRoot._pgCardBound) {
+        vocabRoot.addEventListener('click', (ev) => {
+          const btn = ev.target.closest('[data-card-action]');
+          if (!btn) return;
+          const idx = Number(btn.getAttribute('data-idx'));
+          const act = btn.getAttribute('data-card-action');
+          if (Number.isNaN(idx)) return;
+          if (act === 'save-one') this.saveSingleVocabItem(idx);
+          if (act === 'copy-one') this.copySingleVocabItem(idx);
+        });
+        vocabRoot._pgCardBound = true;
+      }
+
+      // Kick off deferred enrichment with concurrency and lazy rendering
+      if (this.settings && this.settings.enrichVocab && Array.isArray(this.lastVocabItems)) {
+        this._startDeferredVocabEnrichment(content, sourceLang, targetLang, requestId);
+      }
+    }
+
+    // Bind translate mode actions
+    if (learningFocus === 'translate') {
+      const actions = content.querySelector('.polyglot-action-buttons');
+      if (actions && !actions._pgCopyBound) {
+        actions.addEventListener('click', async (ev) => {
+          const btn = ev.target.closest('[data-action="copy-translation"]');
+          if (!btn) return;
+          try {
+            await navigator.clipboard.writeText(translation || '');
+            this.showToast && this.showToast('Copied translation', 'success');
+          } catch (e) {
+            console.error('Copy translation failed:', e);
+            this.showToast && this.showToast('Copy failed', 'error');
+          }
+        });
+        actions._pgCopyBound = true;
+      }
+    }
+  }
+
+  // Save a single vocab item by index
+  async saveSingleVocabItem(idx) {
+    try {
+      const it = this.lastVocabItems?.[idx];
+      if (!it || !it.word) return this.showToast && this.showToast('Nothing to save', 'warn');
+      const keyOf = (x) => `${x.word}:::${x.pos}`.toLowerCase();
+      const existing = new Set(this.vocabularyList.map(keyOf));
+      if (!existing.has(keyOf(it))) {
+        this.vocabularyList.push({ ...it, savedAt: Date.now() });
+        await this.saveVocabList();
+        this.showToast && this.showToast(`Saved "${it.word}"`, 'success');
+      } else {
+        this.showToast && this.showToast('Already saved', 'info');
+      }
+    } catch (e) {
+      console.error('Save one failed:', e);
+      this.showToast && this.showToast('Failed to save', 'error');
+    }
+  }
+
+  // Copy a single card as plain text
+  async copySingleVocabItem(idx) {
+    try {
+      const it = this.lastVocabItems?.[idx];
+      if (!it) return;
+      const parts = [
+        `Word: ${it.word}`,
+        it.pos ? `POS: ${it.pos}` : '',
+        it.cefr ? `CEFR: ${it.cefr}` : '',
+        it.frequency ? `Frequency: ${it.frequency}` : '',
+        it.def ? `Definition: ${it.def}` : '',
+        it.reading ? `Reading: ${it.reading}` : '',
+        it.transliteration ? `Transliteration: ${it.transliteration}` : '',
+        it.pronunciation ? `Pronunciation: ${it.pronunciation}` : '',
+        it.register ? `Register: ${it.register}` : '',
+        it.family ? `Family: ${it.family}` : '',
+        it.etymology ? `Etymology: ${it.etymology}` : '',
+        it.synonyms ? `Synonyms: ${it.synonyms}` : '',
+        it.collocations ? `Collocations: ${it.collocations}` : '',
+        it.example ? `Example: ${it.example}` : '',
+        it.exampleTranslation ? `Translation: ${it.exampleTranslation}` : ''
+      ].filter(Boolean).join('\n');
+      await navigator.clipboard.writeText(parts);
+      this.showToast && this.showToast('Copied card', 'success');
+    } catch (e) {
+      console.error('Copy one failed:', e);
+      this.showToast && this.showToast('Copy failed', 'error');
+    }
+  }
+
+  // Run enrichment after initial render with concurrency cap and lazy updates as cards scroll into view
+  _startDeferredVocabEnrichment(container, sourceLang, targetLang, requestId) {
+    try {
+      if (requestId !== this.activeRequestId) return; // stale guard
+      const cards = Array.from(container.querySelectorAll('.polyglot-vocabulary-analysis .word-card'));
+      if (!cards.length) return;
+
+      // Add loading spinners to cards (hidden until queued)
+      for (const card of cards) {
+        if (!card.querySelector('.pg-card-loading')) {
+          const spinner = document.createElement('div');
+          spinner.className = 'pg-card-loading';
+          spinner.innerHTML = '<div class="polyglot-spinner" style="width:16px;height:16px;margin-right:6px"></div><span>Enhancing…</span>';
+          spinner.style.display = 'none';
+          spinner.style.alignItems = 'center';
+          spinner.style.gap = '6px';
+          spinner.style.marginTop = '6px';
+          card.appendChild(spinner);
+        }
+      }
+
+      const items = this.lastVocabItems.slice();
+      const maxN = Math.min(items.length, (this.settings.vocabEnrichMaxItems || 6));
+      const concurrency = Math.max(1, Math.min(this.settings.vocabEnrichConcurrency || 2, 4));
+      const queue = [];
+      for (let i = 0; i < maxN; i++) queue.push(i);
+
+      const inView = new Set();
+      const observer = new IntersectionObserver((entries) => {
+        for (const e of entries) {
+          const idx = Number(e.target.getAttribute('data-idx'));
+          if (e.isIntersecting) inView.add(idx); else inView.delete(idx);
+        }
+      }, { root: container.querySelector('.polyglot-tooltip-content') || container, rootMargin: '50px', threshold: 0.01 });
+      cards.forEach(c => observer.observe(c));
+
+      const pickNext = () => {
+        // Prefer cards in view; otherwise take from front
+        let pos = queue.findIndex(i => inView.has(i));
+        if (pos === -1) pos = 0;
+        return queue.splice(pos, 1)[0];
+      };
+
+      let active = 0;
+      const runNext = async () => {
+        if (requestId !== this.activeRequestId) { observer.disconnect(); return; }
+        if (!queue.length) { if (active === 0) observer.disconnect(); return; }
+        while (active < concurrency && queue.length) {
+          const idx = pickNext();
+          if (idx === undefined) break;
+          active++;
+          const card = cards[idx];
+          const spinner = card?.querySelector?.('.pg-card-loading');
+          if (spinner) spinner.style.display = 'flex';
+          // Perform single-item enrichment
+          (async () => {
+            try {
+              const [enriched] = await this.enrichVocabularyItems([items[idx]], { sourceLang, targetLang, strategy: this.settings.vocabStrategy || 'adaptive' });
+              // Update in-memory and card
+              if (enriched) {
+                items[idx] = enriched;
+                this.lastVocabItems[idx] = enriched;
+                if (card && requestId === this.activeRequestId) {
+                  const tmp = document.createElement('div');
+                  tmp.innerHTML = this.renderVocabItems([enriched]);
+                  const newCard = tmp.querySelector('.word-card');
+                  if (newCard) {
+                    // Replace content but keep original classes (color-*) and data-idx
+                    const header = newCard.querySelector('.word-card-header');
+                    const newContent = newCard.innerHTML;
+                    card.innerHTML = newContent;
+                    // Ensure the index badge shows the correct number
+                    const badge = card.querySelector('.word-index');
+                    if (badge) badge.textContent = String((idx + 1));
+                  }
+                }
+              }
+            } catch (_) { /* ignore */ }
+            finally {
+              if (spinner) spinner.style.display = 'none';
+              active--;
+              runNext();
+            }
+          })();
+        }
+      };
+      runNext();
+    } catch (e) {
+      console.log('Deferred enrichment failed to start:', e?.message || e);
+    }
   }
 
   showTestTooltip(text) {
