@@ -13,7 +13,7 @@
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-  "js": ["lang-utils.js", "vocab-utils.js", "ai-utils.js", "content.js"],
+  "js": ["lang-utils.js", "vocab-utils.js", "ai-utils.js", "ai-enhanced.js", "content.js"],
       "css": ["tooltip.css"],
       "run_at": "document_end"
     }

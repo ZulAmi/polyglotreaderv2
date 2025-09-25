@@ -81,192 +81,37 @@ class PolyglotReader {
 
   // Optional: Ensure Proofreader session when available
 
-  // Enrich vocabulary items using available Chrome AI APIs (Writer, Rewriter, Proofreader, Translator, Summarizer)
+  // Enrich vocabulary items by delegating to centralized AI utilities
   async enrichVocabularyItems(items, { sourceLang, targetLang, strategy } = {}) {
     try {
       if (!Array.isArray(items) || items.length === 0) return items;
-      // Always enrich all items in vocabulary mode to use all available APIs
-      const maxN = items.length;
-
-      // Prepare available sessions
-      const writer = window.PG?.ai?.ensureWriterReady ? await window.PG.ai.ensureWriterReady() : null;
-      const rewriter = window.PG?.ai?.ensureRewriterReady ? await window.PG.ai.ensureRewriterReady() : null;
-      const proofreader = window.PG?.ai?.ensureProofreaderReady ? await window.PG.ai.ensureProofreaderReady() : null;
-      const summarizer = window.PG?.ai?.ensureSummarizerReady ? await window.PG.ai.ensureSummarizerReady() : null;
-      // Translator on-demand per pair
-
-      // Process items concurrently for better performance
-      const enrichmentPromises = [];
-      for (let i = 0; i < maxN; i++) {
-        enrichmentPromises.push(this.enrichSingleItem(items[i], { writer, rewriter, proofreader, summarizer, sourceLang, targetLang, strategy }));
+      if (window.PG?.aiEnhanced?.enrichVocabularyItems) {
+        const opts = {
+          sourceLang,
+          targetLang,
+          strategy: strategy || this.settings?.vocabStrategy || 'adaptive',
+          maxItems: this.settings?.vocabEnrichMaxItems || items.length,
+          concurrency: this.settings?.vocabEnrichConcurrency || 2
+        };
+        return await window.PG.aiEnhanced.enrichVocabularyItems(items, opts);
       }
-      
-      const enrichedItems = await Promise.all(enrichmentPromises);
-      return enrichedItems;
-    } catch (_) {
+      return items;
+    } catch (e) {
+      console.log('enrichVocabularyItems delegation failed:', e?.message || e);
       return items;
     }
   }
 
-  // Enrich a single vocabulary item with timeout for performance
+  // Enrich a single vocabulary item by delegating to centralized AI utilities
   async enrichSingleItem(it, { writer, rewriter, proofreader, summarizer, sourceLang, targetLang, strategy }) {
-    const startTime = Date.now();
     try {
-      const sessions = window.PG?.ai?.getSessions();
-      
-      // Ensure we have the correct source language for the example
-      const actualSourceLang = sourceLang || 'auto';
-      console.log(`🎯 Creating example for "${it.word}" in ${actualSourceLang}`);
-      
-      // 0) Ensure we have a concise dictionary-style definition
-      if ((!it.def || it.def.length < 3) && sessions?.languageModel) {
-        try {
-          const tgtName = targetLang || 'en';
-          const prompt = `Return ONLY a concise dictionary-style definition (max 18 words) for the ${actualSourceLang} word "${it.word}" in ${tgtName}. No examples, no extra text.`;
-          const out = await sessions.languageModel.prompt(prompt, { language: this.getLanguageCode(targetLang || 'en') });
-          const def = String(out || '').trim().replace(/^[-*•\d.\s]+/, '');
-          if (def) it.def = def;
-        } catch (_) { /* ignore */ }
+      if (window.PG?.aiEnhanced?.enrichSingleItem) {
+        return await window.PG.aiEnhanced.enrichSingleItem(it, { sourceLang, targetLang, strategy });
       }
-      
-      // 0) Ensure we have a concise dictionary-style definition
-      if ((!it.def || it.def.length < 3) && sessions?.languageModel) {
-        try {
-          const tgtName = targetLang || 'en';
-          const prompt = `Return ONLY a concise dictionary-style definition (max 18 words) for the ${actualSourceLang} word "${it.word}" in ${tgtName}. No examples, no extra text.`;
-          const out = await sessions.languageModel.prompt(prompt, { language: this.getLanguageCode(targetLang || 'en') });
-          const def = String(out || '').trim().replace(/^[-*•\d.\s]+/, '');
-          if (def) it.def = def;
-        } catch (_) { /* ignore */ }
-      }
-      
-      // 1) Ensure we have an example sentence (short). Use fast Language Model instead of slower Writer API.
-      if ((!it.example || it.example.length < 4) && sessions?.languageModel) {
-        try {
-          const prompt = `Write one short, simple ${actualSourceLang} sentence using the word "${it.word}" at CEFR A2 level. Keep it under 12 words. Return ONLY the sentence, no explanations.`;
-          const out = await sessions.languageModel.prompt(prompt, { language: this.getLanguageCode(actualSourceLang || 'auto') });
-          it.example = String(out || '').trim();
-        } catch (e) { 
-          console.log(`⚠️ Language Model example failed for "${it.word}":`, e);
-          // Fallback to Writer API only if Language Model fails
-          if (writer) {
-            try {
-              const prompt = `Write one short, simple ${actualSourceLang} sentence using the word "${it.word}" at CEFR A2. Keep it under 12 words.`;
-              const out = await writer.write({ prompt });
-              it.example = String(out?.text || out || '').trim();
-            } catch (e2) { /* ignore */ }
-          }
-        }
-      }
-
-      // Post-process example to ensure it's actually short (max 2 sentences, 120 characters)
-      if (it.example && it.example.length > 120) {
-        // Split by sentence boundaries and take first 1-2 sentences
-        const sentences = it.example.split(/[.!?。！？]+/).map(s => s.trim()).filter(Boolean);
-        if (sentences.length > 0) {
-          const short = sentences.slice(0, 2).join('. ');
-          if (short.length <= 120) {
-            it.example = short + (short.match(/[.!?。！？]$/) ? '' : '.');
-          } else {
-            // Even 2 sentences are too long, take just the first one
-            it.example = sentences[0] + (sentences[0].match(/[.!?。！？]$/) ? '' : '.');
-          }
-        }
-      }
-
-      // 2) Simplify example for beginners - try fast Language Model first, fallback to Rewriter
-      if (it.example && it.example.length > 20) {
-        try {
-          // Try Language Model first (faster)
-          if (sessions?.languageModel) {
-            const prompt = `Simplify this ${actualSourceLang} sentence to be shorter and easier (CEFR A1-A2 level). Return ONLY the simplified sentence:\n"""${it.example}"""`;
-            const out = await sessions.languageModel.prompt(prompt, { language: this.getLanguageCode(actualSourceLang || 'auto') });
-            const simp = String(out || '').trim();
-            if (simp && simp.length < it.example.length && simp.length <= it.example.length + 20) {
-              it.exampleSimple = simp;
-            }
-          }
-          // Fallback to Rewriter API if Language Model didn't produce a good result
-          if (!it.exampleSimple && rewriter) {
-            const out = await rewriter.rewrite({ text: it.example });
-            const simp = String(out?.text || out || '').trim();
-            if (simp && simp.length <= it.example.length + 20) it.exampleSimple = simp;
-          }
-        } catch (e) { /* ignore */ }
-      }
-
-      // 3) Skip proofreading for speed - it's not essential for vocabulary learning
-      // Proofreader API is very slow and not critical for examples
-      
-      // Skip: Proofreader step removed for performance
-
-      // 4) Translate example to target language if different - use fast Language Model first
-      if (it.example && targetLang && sourceLang && targetLang !== sourceLang) {
-        try {
-          // Try Language Model first (faster for short sentences)
-          if (sessions?.languageModel && it.example.length <= 100) {
-            const prompt = `Translate this ${actualSourceLang} sentence to ${targetLang}. Return ONLY the translation:\n"""${it.example}"""`;
-            const out = await sessions.languageModel.prompt(prompt, { language: this.getLanguageCode(targetLang || 'en') });
-            const translation = String(out || '').trim();
-            if (translation && translation !== it.example) {
-              it.exampleTranslation = translation;
-            }
-          }
-          // Fallback to Translator API if Language Model didn't work
-          if (!it.exampleTranslation) {
-            const translator = window.PG?.ai?.ensureTranslatorReady ? await window.PG.ai.ensureTranslatorReady(targetLang, sourceLang) : null;
-            if (translator) {
-              const tr = await translator.translate(it.example);
-              it.exampleTranslation = String(tr?.translatedText || tr || '').trim();
-            }
-          }
-        } catch (e) { /* ignore */ }
-      }
-
-      // 4.5) Generate sentence transliteration (Romaji/Pinyin/romanization) using Language Model
-      if (it.example && sessions?.languageModel) {
-        try {
-          const label = actualSourceLang === 'ja' ? 'romaji' : (actualSourceLang === 'zh' ? 'pinyin' : 'latin script transliteration');
-          const langName = actualSourceLang || 'source language';
-          const prompt = `Return ONLY the ${label} of this ${langName} sentence (no translation, no explanations, no quotes):\n"""${it.example}"""`;
-          const lmOut = await sessions.languageModel.prompt(prompt, { language: this.getLanguageCode(targetLang || 'en') });
-          const transl = String(lmOut || '').trim();
-          if (transl) it.exampleTranslit = transl;
-        } catch (_) { /* ignore */ }
-      }
-
-      // 5) Skip usage summary for speed - Summarizer API is slow and not essential
-      // Usage summaries removed for performance - basic definition is sufficient
-
-      // 6) Generate transliteration for key lexical fields when in non-Latin scripts
-      if (sessions?.languageModel && (actualSourceLang === 'ja' || actualSourceLang === 'zh' || actualSourceLang === 'ko' || actualSourceLang === 'ar')) {
-        const label = actualSourceLang === 'ja' ? 'romaji' : (actualSourceLang === 'zh' ? 'pinyin' : 'latin script transliteration');
-        const toTranslit = [
-          ['family', it.family],
-          ['synonyms', it.synonyms],
-          ['antonyms', it.antonyms],
-          ['collocations', it.collocations]
-        ];
-        for (const [key, val] of toTranslit) {
-          try {
-            const text = String(val || '').trim();
-            if (!text) continue;
-            const prompt = `Return ONLY the ${label} for each comma-separated item below, preserving order and separation. Input: ${text}`;
-            const out = await sessions.languageModel.prompt(prompt, { language: this.getLanguageCode(targetLang || 'en') });
-            const t = String(out || '').trim();
-            if (t) it[`${key}Translit`] = t;
-          } catch (_) { /* ignore */ }
-        }
-      }
-      
-      const elapsed = Date.now() - startTime;
-      console.log(`✅ Enriched "${it.word}" in ${elapsed}ms`);
-      return it;
     } catch (e) {
-      const elapsed = Date.now() - startTime;
-      console.log(`❌ Failed to enrich "${it.word}" after ${elapsed}ms:`, e.message);
-      return it;
+      console.log('⚠️ enrichSingleItem delegation failed:', e?.message || e);
     }
+    return it;
   }
 
   createTooltip() {
@@ -1102,7 +947,7 @@ Text context: """${sample}"""`;
   getLanguageCode(lang) { return window.PG?.lang?.getLanguageCode(lang); }
 
   // Condense a summary to be short and learner-friendly
-  condenseSummary(text, options = {}) { return window.PG?.vocab?.condenseSummary(text, options); }
+  condenseSummary(text, options = {}) { return window.PG?.aiEnhanced?.condenseSummary(text, options); }
 
   async getLearningContent(text, targetLang, focus, sourceLang) {
     try {
@@ -1115,100 +960,28 @@ Text context: """${sample}"""`;
       switch (focus) {
         case 'summary':
           console.log(`📄 Summary analysis requested for: "${text}"`);
-          // Ensure summarizer session (may require user gesture)
-          const sessions = window.PG?.ai?.getSessions();
-          if (!sessions?.summarizer) {
-            await window.PG?.ai?.ensureSummarizerReady?.();
-          }
-          if (sessions?.summarizer) {
-            try {
-              console.log('🔍 Creating summary');
-              const cacheKey = `summary|${targetLang}|${sourceLang}|${text}`;
-              if (this.learningCache.has(cacheKey)) {
-                console.log('🗃️ Cache hit for summary');
-                return this.learningCache.get(cacheKey);
-              }
-              
-              if (this.inFlightLearning.has(cacheKey)) {
-                console.log('🛫 Awaiting in-flight summary');
-                try { return await this.inFlightLearning.get(cacheKey); } catch (e) { /* fallthrough */ }
-              }
-              
-              const summaryPromise = (async () => {
-                const result = await sessions.summarizer.summarize(text);
-                const rawSummary = result?.summary || result || 'Summary not available';
-
-                // Condense the summary to a short, learner-friendly size
-                const condensed = this.condenseSummary(rawSummary, { maxBullets: 5, maxSentences: 3, charCap: 500 });
-
-                // Detect the language of the condensed summary and enforce source-language for Original Summary
-                let summaryLang = null;
-                try {
-                  if (sessions?.languageDetector?.detect) {
-                    const det = await sessions.languageDetector.detect(condensed);
-                    const arr = Array.isArray(det) ? det : [det];
-                    if (arr.length && (arr[0]?.detectedLanguage || arr[0])) {
-                      summaryLang = arr[0].detectedLanguage || arr[0];
-                    }
-                  }
-                } catch (_) { /* ignore */ }
-                if (!summaryLang) summaryLang = this.detectLanguageFallback(condensed);
-
-                // Prepare original summary text (in source language when known)
-                let summaryForOriginal = condensed;
-                try {
-                  if (sourceLang && sourceLang !== 'auto' && summaryLang && summaryLang !== sourceLang) {
-                    const toSource = await window.PG?.ai?.ensureTranslatorReady?.(sourceLang, summaryLang);
-                    if (toSource) {
-                      const trSrc = await toSource.translate(condensed);
-                      summaryForOriginal = trSrc?.translatedText || trSrc || condensed;
-                    }
-                  }
-                } catch (e) {
-                  console.log('⚠️ Could not translate summary back to source language:', e?.message || e);
-                }
-
-                // Build Original Summary HTML
-                const originalBody = summaryForOriginal
-                  .split('\n')
-                  .map(line => line.trim() ? `<p>${line}</p>` : '')
-                  .join('');
-
-                // Prepare Translated Summary (to target language)
-                let translatedBody = originalBody;
-                try {
-                  if (targetLang && sourceLang && sourceLang !== 'auto' && targetLang !== sourceLang) {
-                    const toTarget = await window.PG?.ai?.ensureTranslatorReady?.(targetLang, sourceLang);
-                    if (toTarget) {
-                      const trTgt = await toTarget.translate(summaryForOriginal);
-                      const translatedText = trTgt?.translatedText || trTgt || summaryForOriginal;
-                      translatedBody = translatedText
-                        .split('\n')
-                        .map(line => line.trim() ? `<p>${line}</p>` : '')
-                        .join('');
-                    }
-                  }
-                } catch (e) {
-                  console.log('⚠️ Summary translation to target skipped due to error:', e?.message || e);
-                }
-
-                const payload = { original: originalBody, translated: translatedBody };
-                this.learningCache.set(cacheKey, payload);
-                return payload;
-              })();
-              
-              this.inFlightLearning.set(cacheKey, summaryPromise);
-              const result = await summaryPromise;
-              this.inFlightLearning.delete(cacheKey);
-              return result;
-              
-            } catch (error) {
-              console.error('Summarizer failed:', error);
-              throw error;
+          {
+            const cacheKey = `summary|${targetLang}|${sourceLang}|${text}`;
+            if (this.learningCache.has(cacheKey)) {
+              console.log('🗃️ Cache hit for summary');
+              return this.learningCache.get(cacheKey);
             }
-          } else {
-            console.log('❌ Summarizer not available');
-            throw new Error('Summarizer not available. Ensure user gesture occurred and your browser supports Summarizer.');
+            if (this.inFlightLearning.has(cacheKey)) {
+              console.log('🛫 Awaiting in-flight summary');
+              try { return await this.inFlightLearning.get(cacheKey); } catch (_) { /* fallthrough */ }
+            }
+            const exec = (async () => {
+              const payload = await window.PG?.aiEnhanced?.generateSummary?.(text, targetLang, sourceLang);
+              this.learningCache.set(cacheKey, payload);
+              this.learningCacheOrder.push(cacheKey);
+              if (this.learningCacheOrder.length > 30) {
+                const oldest = this.learningCacheOrder.shift();
+                if (oldest) this.learningCache.delete(oldest);
+              }
+              return payload;
+            })();
+            this.inFlightLearning.set(cacheKey, exec);
+            try { return await exec; } finally { this.inFlightLearning.delete(cacheKey); }
           }
           
         case 'vocabulary':
@@ -1323,82 +1096,10 @@ Format with clear headings, bullet points, and detailed explanations. Provide co
           break;
           
         case 'grammar':
-          const grammarSessions = window.PG?.ai?.getSessions();
-          if (grammarSessions?.proofreader) {
-            try {
-              const result = await grammarSessions.proofreader.proofread(text);
-              if (result.suggestions || result) {
-                return `🔍 **Grammar Analysis:**\n\n${result.suggestions || result}`;
-              }
-            } catch (error) {
-              console.error('Proofreader failed:', error);
-            }
-          }
-          
-          if (grammarSessions?.languageModel) {
-            prompt = `Analyze the grammar of "${text}" in detail. Provide:
-
-🏗️ **Grammatical Structure:**
-- Sentence type and structure
-- Subject, verb, object identification
-- Clause analysis (main/subordinate)
-
-📝 **Grammar Points:**
-- Tenses used and their functions
-- Parts of speech breakdown
-- Grammatical rules demonstrated
-- Any complex constructions explained
-
-✏️ **Learning Notes:**
-- Common grammar patterns shown
-- Mistakes to avoid
-- Alternative ways to express the same idea
-- Grammar level (beginner/intermediate/advanced)
-
-🔧 **Corrections & Improvements:**
-- Any errors found and corrections
-- Style suggestions
-- More natural alternatives
-
-Format as clear sections with emojis. Respond in ${targetLang}.`;
-          }
-          break;
+          return await window.PG?.aiEnhanced?.generateGrammar?.(text, targetLang, sourceLang);
           
         case 'verbs':
-          const verbsSessions = window.PG?.ai?.getSessions();
-          if (verbsSessions?.languageModel) {
-            prompt = `Analyze all verbs in "${text}" comprehensively. Provide:
-
-⚡ **Verb Identification:**
-- List all verbs found (main verbs, auxiliary verbs, modal verbs)
-- Verb types (action, linking, helping)
-
-⏰ **Tense & Aspect Analysis:**
-- Present tenses used: ${text}
-- Past tenses used: ${text}  
-- Future tenses used: ${text}
-- Perfect/progressive aspects
-- Time expressions and their relationship to verbs
-
-🔄 **Conjugation Patterns:**
-- Regular vs irregular verbs identified
-- Full conjugation of key verbs
-- Stem changes or pattern rules
-
-📖 **Usage & Meaning:**
-- Verb meanings in context
-- Different meanings of the same verb
-- Phrasal verbs or compound verbs
-- Formal vs informal verb usage
-
-🎯 **Learning Focus:**
-- Difficulty level of verb constructions
-- Common mistakes with these verbs
-- Practice suggestions
-
-Format as clear sections with emojis. Respond in ${targetLang}.`;
-          }
-          break;
+          return await window.PG?.aiEnhanced?.generateVerbs?.(text, targetLang, sourceLang);
           
         case 'translate':
           // For translate mode, we don't need additional learning content
@@ -1500,22 +1201,8 @@ Format as clear sections with emojis. Respond in ${targetLang}.`;
   // Keep only source-language pronunciation; strip cross-language labeled lines
   sanitizeVocabPronunciation(items, sourceLang) { return window.PG?.vocab?.sanitizeVocabPronunciation(items, sourceLang); }
 
-  // Truncate overly long examples to max 2 sentences, 120 characters
-  truncateExample(example) {
-    if (!example || example.length <= 120) return example;
-    // Split by sentence boundaries and take first 1-2 sentences
-    const sentences = example.split(/[.!?。！？]+/).map(s => s.trim()).filter(Boolean);
-    if (sentences.length > 0) {
-      const short = sentences.slice(0, 2).join('. ');
-      if (short.length <= 120) {
-        return short + (short.match(/[.!?。！？]$/) ? '' : '.');
-      } else {
-        // Even 2 sentences are too long, take just the first one
-        return sentences[0] + (sentences[0].match(/[.!?。！？]$/) ? '' : '.');
-      }
-    }
-    return example;
-  }
+  // Truncate overly long examples to max 2 sentences, 120 characters (delegate)
+  truncateExample(example) { return window.PG?.aiEnhanced?.truncateExample(example); }
 
   // Check if source language typically needs transliteration
   needsTransliteration(sourceLang) {
@@ -1586,7 +1273,7 @@ Format as clear sections with emojis. Respond in ${targetLang}.`;
           word,
           pos,
           def,
-          example: ex ? this.truncateExample(ex) : ex,
+          example: ex ? window.PG?.aiEnhanced?.truncateExample(ex) : ex,
           pronunciation: pron,
           transliteration: translitFromTitle,
           difficulty,

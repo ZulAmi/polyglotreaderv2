@@ -73,6 +73,7 @@
           difficulty: String(it.difficulty ?? '').trim(),
           frequency: String(it.frequency ?? '').trim(),
           translation: String(it.translation ?? '').trim(),
+          exampleTranslation: String(it.exampleTranslation ?? it.translation ?? '').trim(),
           cefr: String(it.cefr ?? '').trim(),
           family: String(it.family ?? '').trim(),
           synonyms: Array.isArray(it.synonyms) ? it.synonyms.join(', ') : String(it.synonyms ?? '').trim(),
