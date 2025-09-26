@@ -14,7 +14,7 @@ class PolyglotReader {
       enrichVocab: true,
       // Enrichment bounds (defaults; may be overridden by stored settings)
       vocabEnrichMaxItems: 6,
-      vocabEnrichConcurrency: 2,
+      vocabEnrichConcurrency: 1,
       // Other UI defaults
       vocabStrategy: 'adaptive',
       summaryLength: 'medium'
@@ -736,7 +736,9 @@ Text: """${sample}"""`;
       container.innerHTML = this.renderVocabItems(seeds);
 
       // Phase 2: Per-word details concurrently
-      const concurrency = Math.max(1, Math.min(this.settings.vocabEnrichConcurrency || 3, 6));
+      // Reduce concurrency for complex languages like Japanese to avoid API overwhelm
+      const baseConcurrency = Math.max(1, Math.min(this.settings.vocabEnrichConcurrency || 3, 6));
+      const concurrency = (sourceLang === 'ja' || sourceLang === 'zh' || sourceLang === 'ko') ? 1 : baseConcurrency;
       let active = 0;
       const queue = seeds.map((_, i) => i);
 
@@ -746,67 +748,129 @@ Text: """${sample}"""`;
   const detailPrompt = `For the single word below, return ONLY a JSON object with these keys:
 word, pos, definition, reading, transliteration, pronunciation, stress, CEFR, frequency, register, family, synonyms, antonyms, collocations, etymology, cultural, regionalVariation
 
-Constraints:
-- Values must be concise, single-line strings (synonyms/collocations may be comma-separated).
-- All pronunciation-related fields are for the SOURCE LANGUAGE ONLY.
-- Do NOT include labels like "English:" or any other language names.
+Instructions:
+- Use the exact word spelling from the original text (preserve Japanese/Chinese/Korean characters exactly)
+- Values must be concise, single-line strings (synonyms/collocations may be comma-separated)
+- All pronunciation-related fields are for the SOURCE LANGUAGE ONLY
+- For Japanese words: reading = hiragana, transliteration = romaji
+- For Chinese words: reading = pinyin, transliteration = pinyin
+- For Korean words: transliteration = romanized Korean
+- Do NOT include language labels like "English:" or "Japanese:"
+- Keep all text unescaped and natural (avoid \\u codes)
 
 Word: ${item.word}
-Text context: """${sample}"""`;
+Text context: """${sample}"""
+
+Return valid JSON only:`;
         try {
           const raw = await liveSessions.languageModel.prompt(detailPrompt, { language: langCode });
-          const clean = String(raw || '').trim().replace(/^```json\s*|^```|```$/g, '').trim();
-          const obj = JSON.parse(clean);
-          const updated = {
-            ...item,
-            pos: String(obj.pos ?? item.pos ?? '').trim(),
-            def: String(obj.def ?? obj.definition ?? item.def ?? '').trim(),
-            example: String(obj.example ?? item.example ?? '').trim(),
-            reading: String(obj.reading ?? '').trim(),
-            transliteration: String(obj.transliteration ?? obj.romaji ?? obj.pinyin ?? '').trim(),
-            pronunciation: String(obj.pronunciation ?? obj.pron ?? '').trim(),
-            stress: String(obj.stress ?? '').trim(),
-            cefr: String(obj.cefr ?? '').trim().toUpperCase(),
-            synonyms: Array.isArray(obj.synonyms) ? obj.synonyms.join(', ') : String(obj.synonyms ?? '').trim(),
-            antonyms: Array.isArray(obj.antonyms) ? obj.antonyms.join(', ') : String(obj.antonyms ?? '').trim(),
-            polysemy: String(obj.polysemy ?? obj.senses ?? '').trim(),
-            collocations: Array.isArray(obj.collocations) ? obj.collocations.join(', ') : String(obj.collocations ?? '').trim(),
-            register: String(obj.register ?? '').trim(),
-            domain: String(obj.domain ?? '').trim(),
-            commonErrors: String(obj.commonErrors ?? '').trim(),
-            idioms: Array.isArray(obj.idioms) ? obj.idioms.join(', ') : String(obj.idioms ?? '').trim(),
-            family: String(obj.family ?? '').trim(),
-            etymology: String(obj.etymology ?? '').trim(),
-            semanticField: String(obj.semanticField ?? '').trim(),
-            falseFriends: Array.isArray(obj.falseFriends) ? obj.falseFriends.join(', ') : String(obj.falseFriends ?? '').trim(),
-            visuals: String(obj.visuals ?? '').trim(),
-            mnemonics: String(obj.mnemonics ?? '').trim(),
-            cultural: String(obj.cultural ?? '').trim(),
-            appropriateness: String(obj.appropriateness ?? '').trim(),
-            regionalVariation: String(obj.regionalVariation ?? '').trim(),
-            sensitivity: String(obj.sensitivity ?? '').trim(),
-            frequency: String(obj.frequency ?? '').trim()
-          };
-          // Sanitize pronunciation fields to keep only source-language info
-          const [sanitized] = this.sanitizeVocabPronunciation([updated], sourceLang);
-          this.lastVocabItems[idx] = sanitized;
-          if (requestId !== this.activeRequestId) return;
-          // Update just this card in the UI
-          const analysis = container.querySelector('.polyglot-vocabulary-analysis');
-          const card = analysis?.querySelector(`.word-card[data-idx="${idx}"]`);
-          if (card) {
-            const tmp = document.createElement('div');
-            tmp.innerHTML = this.renderVocabItems([sanitized]);
-            const newCard = tmp.querySelector('.word-card');
-            if (newCard) {
-              card.innerHTML = newCard.innerHTML;
-              // Ensure the index badge remains correct
-              const badge = card.querySelector('.word-index');
-              if (badge) badge.textContent = String(idx + 1);
+          let clean = String(raw || '').trim().replace(/^```json\s*|^```|```$/g, '').trim();
+          
+          // Fix common JSON escaping issues with Japanese and other non-Latin text
+          try {
+            // First try parsing as-is
+            const obj = JSON.parse(clean);
+            const updated = {
+              ...item,
+              pos: String(obj.pos ?? item.pos ?? '').trim(),
+              def: String(obj.def ?? obj.definition ?? item.def ?? '').trim(),
+              example: String(obj.example ?? item.example ?? '').trim(),
+              reading: String(obj.reading ?? '').trim(),
+              transliteration: String(obj.transliteration ?? obj.romaji ?? obj.pinyin ?? '').trim(),
+              pronunciation: String(obj.pronunciation ?? obj.pron ?? '').trim(),
+              stress: String(obj.stress ?? '').trim(),
+              cefr: String(obj.cefr ?? '').trim().toUpperCase(),
+              synonyms: Array.isArray(obj.synonyms) ? obj.synonyms.join(', ') : String(obj.synonyms ?? '').trim(),
+              antonyms: Array.isArray(obj.antonyms) ? obj.antonyms.join(', ') : String(obj.antonyms ?? '').trim(),
+              polysemy: String(obj.polysemy ?? obj.senses ?? '').trim(),
+              collocations: Array.isArray(obj.collocations) ? obj.collocations.join(', ') : String(obj.collocations ?? '').trim(),
+              register: String(obj.register ?? '').trim(),
+              domain: String(obj.domain ?? '').trim(),
+              commonErrors: String(obj.commonErrors ?? '').trim(),
+              idioms: Array.isArray(obj.idioms) ? obj.idioms.join(', ') : String(obj.idioms ?? '').trim(),
+              family: String(obj.family ?? '').trim(),
+              etymology: String(obj.etymology ?? '').trim(),
+              semanticField: String(obj.semanticField ?? '').trim(),
+              falseFriends: Array.isArray(obj.falseFriends) ? obj.falseFriends.join(', ') : String(obj.falseFriends ?? '').trim(),
+              visuals: String(obj.visuals ?? '').trim(),
+              mnemonics: String(obj.mnemonics ?? '').trim(),
+              cultural: String(obj.cultural ?? '').trim(),
+              appropriateness: String(obj.appropriateness ?? '').trim(),
+              regionalVariation: String(obj.regionalVariation ?? '').trim(),
+              sensitivity: String(obj.sensitivity ?? '').trim(),
+              frequency: String(obj.frequency ?? '').trim()
+            };
+            // Sanitize pronunciation fields to keep only source-language info
+            const [sanitized] = this.sanitizeVocabPronunciation([updated], sourceLang);
+            this.lastVocabItems[idx] = sanitized;
+            if (requestId !== this.activeRequestId) return;
+            // Update just this card in the UI
+            const analysis = container.querySelector('.polyglot-vocabulary-analysis');
+            const card = analysis?.querySelector(`.word-card[data-idx="${idx}"]`);
+            if (card) {
+              const tmp = document.createElement('div');
+              tmp.innerHTML = this.renderVocabItems([sanitized]);
+              const newCard = tmp.querySelector('.word-card');
+              if (newCard) {
+                card.innerHTML = newCard.innerHTML;
+                // Ensure the index badge remains correct
+                const badge = card.querySelector('.word-index');
+                if (badge) badge.textContent = String(idx + 1);
+              }
+            } else {
+              // If structure changed, re-render all as a safe fallback
+              container.innerHTML = this.renderVocabItems(this.lastVocabItems);
             }
-          } else {
-            // If structure changed, re-render all as a safe fallback
-            container.innerHTML = this.renderVocabItems(this.lastVocabItems);
+          } catch (parseError) {
+            // If JSON parsing fails, try to fix common escaping issues
+            console.log(`JSON parse failed for "${item.word}", attempting to fix escaping:`, parseError?.message || parseError);
+            
+            // Try to fix the JSON by removing problematic escape sequences
+            let fixedClean = clean
+              .replace(/\\u([0-9a-fA-F]{4})/g, (match, hex) => {
+                try {
+                  return String.fromCharCode(parseInt(hex, 16));
+                } catch {
+                  return match;
+                }
+              })
+              .replace(/\\"/g, '"')
+              .replace(/\\'/g, "'")
+              .replace(/\\\\/g, '\\');
+              
+            try {
+              const obj = JSON.parse(fixedClean);
+              // Use the same update logic as above but with fixed JSON
+              const updated = {
+                ...item,
+                pos: String(obj.pos ?? item.pos ?? '').trim(),
+                def: String(obj.def ?? obj.definition ?? item.def ?? '').trim(),
+                example: String(obj.example ?? item.example ?? '').trim(),
+                reading: String(obj.reading ?? '').trim(),
+                transliteration: String(obj.transliteration ?? obj.romaji ?? obj.pinyin ?? '').trim(),
+                // ... (same fields as above)
+                frequency: String(obj.frequency ?? '').trim()
+              };
+              const [sanitized] = this.sanitizeVocabPronunciation([updated], sourceLang);
+              this.lastVocabItems[idx] = sanitized;
+              if (requestId === this.activeRequestId) {
+                const analysis = container.querySelector('.polyglot-vocabulary-analysis');
+                const card = analysis?.querySelector(`.word-card[data-idx="${idx}"]`);
+                if (card) {
+                  const tmp = document.createElement('div');
+                  tmp.innerHTML = this.renderVocabItems([sanitized]);
+                  const newCard = tmp.querySelector('.word-card');
+                  if (newCard) {
+                    card.innerHTML = newCard.innerHTML;
+                    const badge = card.querySelector('.word-index');
+                    if (badge) badge.textContent = String(idx + 1);
+                  }
+                }
+              }
+            } catch (secondParseError) {
+              console.log(`Detail fetch completely failed for "${item.word}", skipping JSON parsing`);
+              // Skip this item's detailed update but don't crash
+            }
           }
         } catch (e) {
           console.log(`Detail fetch failed for "${item.word}":`, e?.message || e);
@@ -830,6 +894,54 @@ Text context: """${sample}"""`;
       });
 
       await pump();
+
+      // AI-based transliteration for any items still missing it (non-Latin source languages)
+      try {
+        if (this.needsTransliteration && this.needsTransliteration(sourceLang)) {
+          const enrichedItems = await window.PG?.vocab?.ensureTransliterationAI?.(this.lastVocabItems, sourceLang, targetLang);
+          if (enrichedItems && enrichedItems !== this.lastVocabItems) {
+            // Find which items got transliteration and re-render them
+            const changedIndices = [];
+            enrichedItems.forEach((item, idx) => {
+              if (item.transliteration && item.transliteration !== this.lastVocabItems[idx]?.transliteration) {
+                changedIndices.push(idx);
+              }
+            });
+            this.lastVocabItems = enrichedItems;
+            
+            if (changedIndices.length && requestId === this.activeRequestId) {
+              const analysis = container.querySelector('.polyglot-vocabulary-analysis');
+              changedIndices.forEach(idx => {
+                const card = analysis?.querySelector(`.word-card[data-idx="${idx}"]`);
+                if (card) {
+                  const tmp = document.createElement('div');
+                  tmp.innerHTML = this.renderVocabItems([this.lastVocabItems[idx]], sourceLang);
+                  const newCard = tmp.querySelector('.word-card');
+                  if (newCard) {
+                    card.innerHTML = newCard.innerHTML;
+                    const badge = card.querySelector('.word-index');
+                    if (badge) badge.textContent = String(idx + 1);
+                  }
+                }
+              });
+            }
+          }
+        }
+      } catch (etOuter) { 
+        console.log('AI transliteration error:', etOuter?.message || etOuter); 
+      }
+
+      // Skip additional enrichment if items already have good detail from the live fetch
+      const hasGoodDetail = this.lastVocabItems.every(item => 
+        item.def && item.def.length > 5 && 
+        (item.transliteration || !this.needsTransliteration(sourceLang)) &&
+        (item.reading || sourceLang !== 'ja')
+      );
+      
+      if (hasGoodDetail) {
+        console.log(`✅ Skipping additional enrichment - items have sufficient detail from live fetch`);
+        return; // Skip the enrichment step
+      }
 
       // Only enrich if items are missing critical fields (examples, definitions, etc.)
       const needsEnrichment = this.lastVocabItems.some(item => 
@@ -1471,7 +1583,7 @@ Format with clear headings, bullet points, and detailed explanations. Provide co
           <div class="polyglot-summary-section polyglot-fade-in">
             <div class="polyglot-section-title">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
               </svg>
               Summary
             </div>

@@ -34,13 +34,33 @@ window.PG.aiEnhanced.enrichVocabularyItems = async function(items, options = {})
   }
   
   const sessions = window.PG.aiEnhanced.getSessions();
-  if (!sessions?.languageModel) {
-    console.log('⚠️ Cannot enrich vocabulary - Language Model not available');
+  if (!sessions?.languageModel && !sessions?.writer && !sessions?.rewriter) {
+    console.log('⚠️ Cannot enrich vocabulary - no AI APIs available');
     return items;
   }
   
   console.log(`🔧 Starting vocabulary enrichment for ${items.length} items (strategy: ${strategy})`);
   const startTime = Date.now();
+  
+  // Resolve source language once for the entire batch to avoid redundant detection calls
+  let resolvedSourceLang = sourceLang;
+  if ((!sourceLang || sourceLang === 'auto') && sessions?.languageDetector?.detect && items.length > 0) {
+    try {
+      // Use the first item with content to detect language
+      const sampleItem = items.find(item => item.word || item.example) || items[0];
+      const sampleText = sampleItem?.example || sampleItem?.word || '';
+      if (sampleText) {
+        const det = await sessions.languageDetector.detect(sampleText);
+        const detectedLang = String(det?.detectedLanguage || det?.language || det || '').toLowerCase();
+        if (detectedLang) {
+          resolvedSourceLang = detectedLang;
+          console.log(`🔍 Resolved source language for batch: ${resolvedSourceLang}`);
+        }
+      }
+    } catch (e) {
+      console.log('⚠️ Batch language detection failed, using provided sourceLang:', e?.message || e);
+    }
+  }
   
   // Limit items to process
   const itemsToProcess = items.slice(0, maxItems);
@@ -50,7 +70,12 @@ window.PG.aiEnhanced.enrichVocabularyItems = async function(items, options = {})
   const processBatch = async (batch) => {
     const promises = batch.map(async (item) => {
       try {
-        return await window.PG.aiEnhanced.enrichSingleItem(item, { sourceLang, targetLang, strategy });
+        return await window.PG.aiEnhanced.enrichSingleItem(item, { 
+          sourceLang, 
+          targetLang, 
+          strategy,
+          resolvedSourceLang // Pass the resolved source language to avoid per-item detection
+        });
       } catch (error) {
         console.log('⚠️ Failed to enrich item:', item.word, error?.message || error);
         return item; // Return original on error
@@ -164,31 +189,35 @@ Format as clear sections with emojis. Respond in ${targetLang}.`;
   throw new Error('Verb analysis not available - Language Model required');
 };
 
-// Enrich a single vocabulary item
+// Enrich a single vocabulary item using specialized AI APIs for better performance
 window.PG.aiEnhanced.enrichSingleItem = async function(item, options = {}) {
-  const { sourceLang, targetLang, strategy = 'adaptive' } = options;
+  const { sourceLang, targetLang, strategy = 'adaptive', resolvedSourceLang } = options;
   const sessions = window.PG.aiEnhanced.getSessions();
   
-  if (!sessions?.languageModel) {
-    console.log('⚠️ Language Model not available for enrichment');
+  if (!sessions?.languageModel && !sessions?.writer && !sessions?.rewriter) {
+    console.log('⚠️ No AI APIs available for enrichment');
     return item;
   }
   
   const startTime = Date.now();
   let updated = { ...item };
   
+  // Use pre-resolved source language to avoid redundant detection
+  const effectiveSourceLang = resolvedSourceLang || sourceLang || 'auto';
+  
   try {
     // Only enrich if missing critical fields
     const needsExample = !updated.example || updated.example.length < 4;
     const needsDefinition = !updated.def || updated.def.length < 3;
-    const needsTransliteration = !updated.transliteration && window.PG.aiEnhanced.needsTransliteration(sourceLang);
-    // If example exists but appears to be in the wrong language, mark for regeneration
+    const needsTransliteration = !updated.transliteration && window.PG.aiEnhanced.needsTransliteration(effectiveSourceLang);
+    
+    // Skip expensive language detection if we have a resolved source language
     let exampleLangMismatch = false;
-    if (!needsExample && updated.example && sessions?.languageDetector?.detect && sourceLang && sourceLang !== 'auto') {
+    if (!needsExample && updated.example && !resolvedSourceLang && sessions?.languageDetector?.detect && effectiveSourceLang && effectiveSourceLang !== 'auto') {
       try {
         const det = await sessions.languageDetector.detect(updated.example);
         const outCode = String(det?.detectedLanguage || det?.language || det || '').toLowerCase();
-        const srcCode = String(sourceLang).toLowerCase();
+        const srcCode = String(effectiveSourceLang).toLowerCase();
         if (outCode && srcCode && outCode !== srcCode) {
           exampleLangMismatch = true;
         }
@@ -202,25 +231,32 @@ window.PG.aiEnhanced.enrichSingleItem = async function(item, options = {}) {
     
     console.log(`🔧 Enriching "${updated.word}" (example: ${needsExample}, def: ${needsDefinition}, translit: ${needsTransliteration})`);
     
-    // Generate example if needed or if wrong-language example detected
+    // Generate example using Writer API first (specialized for creative content), fallback to Language Model
     if (needsExample || exampleLangMismatch) {
       try {
-        const langCode = window.PG.lang?.getLanguageCode(sourceLang || 'auto');
-        const examplePrompt = `Write one short, simple sentence in ${sourceLang || 'the source language'} that naturally uses the word "${updated.word}" in context.
-- Keep it under 12 words.
-- Respond ONLY in ${sourceLang || 'the source language'} with the sentence, no translation or explanations.`;
-        let example = String(await sessions.languageModel.prompt(examplePrompt, { language: langCode }) || '').trim();
-        // Verify language; if mismatch, retry with stronger constraint
-        try {
-          if (sessions?.languageDetector?.detect && example && sourceLang && sourceLang !== 'auto') {
-            const det2 = await sessions.languageDetector.detect(example);
-            const out2 = String(det2?.detectedLanguage || det2?.language || det2 || '').toLowerCase();
-            if (out2 && out2 !== String(sourceLang).toLowerCase()) {
-              const retryPrompt = `IMPORTANT: The sentence MUST be in ${sourceLang}. Write one short sentence (<=12 words) in ${sourceLang} using "${updated.word}" in context. Respond ONLY in ${sourceLang}.`;
-              example = String(await sessions.languageModel.prompt(retryPrompt, { language: langCode }) || '').trim();
-            }
+        let example = '';
+        const langCode = window.PG.lang?.getLanguageCode(effectiveSourceLang || 'auto');
+        
+        // Try Writer API first for example generation
+        if (sessions?.writer?.write && strategy !== 'fast') {
+          try {
+            const writerPrompt = `Write one short, simple sentence in ${effectiveSourceLang || 'the source language'} using the word "${updated.word}" naturally in context. Keep it under 12 words.`;
+            const writerResult = await sessions.writer.write(writerPrompt, { language: langCode });
+            example = String(writerResult || '').trim();
+            console.log(`📝 Used Writer API for "${updated.word}" example`);
+          } catch (e) {
+            console.log(`⚠️ Writer API failed for "${updated.word}", trying Language Model:`, e?.message || e);
           }
-        } catch (_) { /* ignore */ }
+        }
+        
+        // Fallback to Language Model if Writer didn't work
+        if (!example && sessions?.languageModel) {
+          const examplePrompt = `Write one short, simple sentence in ${effectiveSourceLang || 'the source language'} that naturally uses the word "${updated.word}" in context.
+- Keep it under 12 words.
+- Respond ONLY in ${effectiveSourceLang || 'the source language'} with the sentence, no translation or explanations.`;
+          example = String(await sessions.languageModel.prompt(examplePrompt, { language: langCode }) || '').trim();
+        }
+        
         if (example && example.length > 3) {
           updated.example = window.PG.aiEnhanced.truncateExample(example);
           // Clear stale derived fields if we replaced/created the example
@@ -232,12 +268,32 @@ window.PG.aiEnhanced.enrichSingleItem = async function(item, options = {}) {
       }
     }
     
-    // Generate definition if needed
+    // Generate definition using Rewriter API first (good for rewriting/defining), fallback to Language Model
     if (needsDefinition) {
       try {
-        const defPrompt = `Define the word "${updated.word}" briefly and clearly. Provide a concise definition in 1-2 sentences.`;
-        const result = await sessions.languageModel.prompt(defPrompt, { language: 'en' });
-        const definition = String(result || '').trim();
+        let definition = '';
+        
+        // Try Rewriter API first for definition generation
+        if (sessions?.rewriter?.rewrite && strategy !== 'fast') {
+          try {
+            const rewriterPrompt = `Rewrite this as a clear, concise definition: "${updated.word}" means`;
+            const rewriterResult = await sessions.rewriter.rewrite(rewriterPrompt, { language: 'en' });
+            definition = String(rewriterResult || '').trim();
+            if (definition.startsWith('"' + updated.word + '"')) {
+              definition = definition.substring(updated.word.length + 2).trim();
+            }
+            console.log(`✏️ Used Rewriter API for "${updated.word}" definition`);
+          } catch (e) {
+            console.log(`⚠️ Rewriter API failed for "${updated.word}", trying Language Model:`, e?.message || e);
+          }
+        }
+        
+        // Fallback to Language Model if Rewriter didn't work
+        if (!definition && sessions?.languageModel) {
+          const defPrompt = `Define the word "${updated.word}" briefly and clearly. Provide a concise definition in 1-2 sentences.`;
+          definition = String(await sessions.languageModel.prompt(defPrompt, { language: 'en' }) || '').trim();
+        }
+        
         if (definition && definition.length > 2) {
           updated.def = definition;
         }
@@ -246,10 +302,10 @@ window.PG.aiEnhanced.enrichSingleItem = async function(item, options = {}) {
       }
     }
     
-    // Generate transliteration if needed
-    if (needsTransliteration) {
+    // Generate transliteration using Language Model (most reliable for this task)
+    if (needsTransliteration && sessions?.languageModel) {
       try {
-        const translitPrompt = `Provide the Latin transliteration for "${updated.word}". Respond with just the transliteration.`;
+        const translitPrompt = `Provide the standard Latin transliteration for the word "${updated.word}". For Japanese, provide romaji. For Chinese, provide pinyin. For Korean, provide romanized Korean. Respond with just the transliteration, no explanations.`;
         const result = await sessions.languageModel.prompt(translitPrompt, { language: 'en' });
         const translit = String(result || '').trim();
         if (translit && translit.length > 0) {
@@ -259,21 +315,31 @@ window.PG.aiEnhanced.enrichSingleItem = async function(item, options = {}) {
         console.log(`⚠️ Transliteration failed for "${updated.word}":`, error?.message || error);
       }
     }
+    
+    // Also generate transliteration for example if it exists and source needs it
+    if (updated.example && !updated.exampleTranslit && window.PG.aiEnhanced.needsTransliteration(effectiveSourceLang)) {
+      try {
+        const exTranslit = await window.PG.aiEnhanced.transliterateText(updated.example, effectiveSourceLang);
+        if (exTranslit) updated.exampleTranslit = exTranslit;
+      } catch (e) { 
+        console.log(`⚠️ Example transliteration failed for "${updated.word}":`, e?.message || e); 
+      }
+    }
 
-    // If an example exists, enrich it with translation (to targetLang) and transliteration when relevant
+    // If an example exists, enrich it with translation and transliteration when relevant
     try {
-      if (updated.example && targetLang && (!sourceLang || sourceLang === 'auto' || targetLang !== sourceLang)) {
+      if (updated.example && targetLang && (!effectiveSourceLang || effectiveSourceLang === 'auto' || targetLang !== effectiveSourceLang)) {
         if (!updated.exampleTranslation) {
           try {
-            const translated = await window.PG.aiEnhanced.translateText(updated.example, targetLang, sourceLang || 'auto');
+            const translated = await window.PG.aiEnhanced.translateText(updated.example, targetLang, effectiveSourceLang || 'auto');
             if (translated && typeof translated === 'string') {
               updated.exampleTranslation = translated;
             }
           } catch (e) { console.log(`⚠️ Example translation failed for "${updated.word}":`, e?.message || e); }
         }
-        if (!updated.exampleTranslit && window.PG.aiEnhanced.needsTransliteration(sourceLang)) {
+        if (!updated.exampleTranslit && window.PG.aiEnhanced.needsTransliteration(effectiveSourceLang)) {
           try {
-            const exTranslit = await window.PG.aiEnhanced.transliterateText(updated.example, sourceLang);
+            const exTranslit = await window.PG.aiEnhanced.transliterateText(updated.example, effectiveSourceLang);
             if (exTranslit) updated.exampleTranslit = exTranslit;
           } catch (e) { console.log(`⚠️ Example transliteration failed for "${updated.word}":`, e?.message || e); }
         }

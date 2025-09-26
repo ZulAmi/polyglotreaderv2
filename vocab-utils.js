@@ -35,6 +35,94 @@
     return condensed;
   };
 
+  // AI-based transliteration utilities using Chrome AI APIs
+  PG.vocab.ensureTransliterationAI = async function ensureTransliterationAI(items, sourceLang, targetLang = 'en') {
+    console.log(`🌐 AI Transliteration requested for source language: ${sourceLang}, target context: ${targetLang}`);
+    const needsTranslit = (items || []).reduce((acc, it, idx) => {
+      const missing = (!it.transliteration || !it.transliteration.trim());
+      const hasNonLatin = it.word && /[^\u0000-\u024F\u1E00-\u1EFF]/.test(it.word);
+      if (missing && hasNonLatin) {
+        acc.push({ idx, word: it.word, reading: it.reading });
+      }
+      return acc;
+    }, []);
+
+    if (!needsTranslit.length) return items;
+    console.log(`🔤 Found ${needsTranslit.length} words needing transliteration:`, needsTranslit.map(n => n.word));
+
+    try {
+      const liveSessions = window.PG?.ai?.getSessions();
+      const lm = liveSessions?.languageModel;
+      if (!lm) return items; // No AI available, return as-is
+
+      const list = needsTranslit.map(m => m.reading ? `${m.word} (reading: ${m.reading})` : m.word).join('\n');
+      const translitPrompt = `Provide ONLY JSON (no prose) mapping original words to Latin transliteration.
+Return an array of objects: [{"word": "original", "transliteration": "latinEquivalent"}].
+Source Language: ${sourceLang}
+Target Language Context: ${targetLang}
+Requirements:
+- Japanese: provide romaji transliteration
+- Chinese: provide pinyin transliteration with tone marks
+- Korean: provide revised romanization (RR)  
+- Arabic: provide standard Latin transliteration
+- Russian/Cyrillic: provide Latin transliteration
+- Other scripts: provide appropriate Latin equivalent
+- Consider the target language context for optimal transliteration style
+
+Words:
+${list}`;
+
+      const rawT = await lm.prompt(translitPrompt, { language: 'en' });  // Use English for consistency as the prompt is in English
+      const cleanT = String(rawT||'').trim().replace(/^```json\s*|^```|```$/g,'').trim();
+      let arrT = [];
+      try { 
+        arrT = JSON.parse(cleanT); 
+      } catch { 
+        // Attempt basic repair
+        try { 
+          arrT = JSON.parse(cleanT.replace(/([,{]\s*word\s*:)\s*([^"{\[][^,}]*)/g,'$1 "$2"')); 
+        } catch (_) {
+          console.log('AI transliteration JSON parse failed:', cleanT.slice(0, 200));
+          return items;
+        }
+      }
+
+      if (Array.isArray(arrT)) {
+        const map = new Map();
+        arrT.forEach(o => { 
+          if (o && o.word && o.transliteration) {
+            map.set(String(o.word).trim(), String(o.transliteration).trim()); 
+          }
+        });
+        
+        const result = [...items];
+        needsTranslit.forEach(m => {
+          const t = map.get(m.word);
+          if (t) {
+            result[m.idx] = { ...result[m.idx], transliteration: t, _aiTranslit: true };
+          }
+        });
+        return result;
+      }
+    } catch (e) {
+      console.log('AI transliteration failed:', e?.message || e);
+    }
+    
+    return items;
+  };
+
+  // Synchronous fallback that marks items needing AI transliteration
+  PG.vocab.ensureTransliteration = function ensureTransliteration(items, sourceLang) {
+    return (items || []).map(it => {
+      const needs = (!it.transliteration || !it.transliteration.trim());
+      const hasNonLatin = it.word && /[^\u0000-\u024F\u1E00-\u1EFF]/.test(it.word);
+      if (needs && hasNonLatin) {
+        return { ...it, _needsAITranslit: true };
+      }
+      return it;
+    });
+  };
+
   PG.vocab.parseVocabJSONToItems = function parseVocabJSONToItems(result, limit) {
     try {
       const clean = String(result || '').trim().replace(/^```json\s*|^```|```$/g, '').trim();
@@ -156,15 +244,73 @@
     return formatted;
   };
 
+  // We patch renderVocabItems to inject fallback transliteration
+  const _origRender = PG.vocab.renderVocabItems;
+  PG.vocab.renderVocabItems = function patchedRenderVocabItems(items, sourceLang) {
+    try {
+      if (!Array.isArray(items)) return _origRender.call(PG.vocab, items, sourceLang);
+      items = PG.vocab.ensureTransliteration(items, sourceLang);
+    } catch (_) {}
+    return _origRender.call(PG.vocab, items, sourceLang);
+  };
+
+  // Enhance UI inside original render (if already defined later) to show explicit Transliteration row
+  const _origRenderRef = PG.vocab.renderVocabItems;
+  PG.vocab.renderVocabItems = function enhancedRenderVocabItems(items, sourceLang) {
+    const html = _origRenderRef.call(PG.vocab, items, sourceLang);
+    // Post-process: ensure each card with non-Latin word has a Transliteration row in Form section if missing
+    try {
+      const parser = document.createElement('div');
+      parser.innerHTML = html;
+      const nonLatinRegex = /[^\u0000-\u024F\u1E00-\u1EFF]/;
+      parser.querySelectorAll('.word-card').forEach(card => {
+        const titleEl = card.querySelector('.word-title');
+        if (!titleEl) return;
+        const wordText = titleEl.textContent || '';
+        if (!nonLatinRegex.test(wordText)) return;
+        const formSection = Array.from(card.querySelectorAll('.word-section')).find(sec => /Form/i.test(sec.textContent));
+        if (!formSection) return;
+        const hasExplicit = /Transliteration|Romaji|Pinyin/i.test(formSection.innerHTML);
+        if (hasExplicit) return;
+        // Attempt to get transliteration from existing emphasis in spelling or data attr
+        let translit = '';
+        const pronParts = formSection.querySelectorAll('.pron-part');
+        pronParts.forEach(p => {
+          const ttl = (p.getAttribute('title')||'').toLowerCase();
+            if (/romaji|pinyin|transliteration/.test(ttl)) translit = p.textContent.trim();
+        });
+        if (!translit) {
+          // Maybe inside word-title parentheses
+          const m = wordText.match(/\(([^)]+)\)\s*$/);
+          if (m) translit = m[1];
+        }
+        if (!translit) return;
+        // Insert a new row after Spelling line
+        const spellingRow = formSection.querySelector('.word-row');
+        if (spellingRow && !/data-added-translit/.test(formSection.innerHTML)) {
+          const row = document.createElement('div');
+          row.className = 'word-row';
+          row.setAttribute('data-added-translit','1');
+          const label = /ja/.test(sourceLang||'') ? 'Romaji' : (/zh/.test(sourceLang||'') ? 'Pinyin' : 'Transliteration');
+          row.innerHTML = `<span class="row-label">${label}</span> ${PG.lang?.escapeHTML ? PG.lang.escapeHTML(translit) : translit}`;
+          spellingRow.insertAdjacentElement('afterend', row);
+        }
+      });
+      return parser.innerHTML;
+    } catch (_) { return html; }
+  };
+
   PG.vocab.renderVocabItems = function renderVocabItems(items, sourceLang) {
     try {
-      const esc = (s) => (PG.lang?.escapeHTML ? PG.lang.escapeHTML(s) : String(s ?? '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])));
+      const esc = (s) => (PG.lang?.escapeHTML ? PG.lang.escapeHTML(s) : String(s ?? '').replace(/[&<>"]'/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c])));
       const toTags = (val) => {
         if (!val) return [];
         if (Array.isArray(val)) return val.map(v => String(v).trim()).filter(Boolean);
         return String(val).split(/[;,·•]\s*|\s{2,}|\n/).map(v => v.trim()).filter(Boolean);
       };
-      
+      const nonLatinLangs = ['ja','zh','ko','ar','hi','th','ru','bg','sr','mk','uk','be','el','he'];
+      const needsLangTranslit = (lang) => nonLatinLangs.includes(lang);
+
       // Helper function to check if text contains non-Latin characters
       const needsTransliteration = (text, lang = sourceLang) => {
         if (!text) return false;
@@ -220,8 +366,19 @@
           it.etymology ? `<div class="word-row"><span class="row-label"><strong>Etymology</strong></span> ${esc(it.etymology)}</div>` : '',
           it.cultural ? `<div class="word-row"><span class="row-label"><strong>Cultural</strong></span> ${esc(it.cultural)}</div>` : ''
         ].filter(Boolean).join('');
-        const exampleRows = [
-          it.example ? `<div class="word-row"><span class="row-label">Example</span> ${formatWithTranslit(it.example, it.exampleTranslit)}</div>` : '',
+        const exampleNeeds = it.example && /[^\u0000-\u024F\u1E00-\u1EFF]/.test(it.example);
+          let exampleDisplay = '';
+          if (it.example) {
+            if (it.exampleTranslit) {
+              exampleDisplay = `${formatWithTranslit(it.example, it.exampleTranslit)}`;
+            } else if (exampleNeeds && it.transliteration) {
+              exampleDisplay = `${formatWithTranslit(it.example, it.transliteration)}`;
+            } else {
+              exampleDisplay = esc(it.example);
+            }
+          }
+          const exampleRows = [
+          it.example ? `<div class="word-row"><span class="row-label">Example</span> ${exampleDisplay}</div>` : '',
           it.exampleTranslation ? `<div class="word-row"><span class="row-label">Translation</span> ${esc(String(it.exampleTranslation || ''))}</div>` : '',
           it.exampleSimple ? `<div class="word-row"><span class="row-label">Simplified</span> ${esc(String(it.exampleSimple || ''))}</div>` : ''
         ].filter(Boolean).join('');
@@ -240,11 +397,11 @@
             <div class="word-section">
               <div class="section-title">Form</div>
               <div class="word-row"><span class="row-label">Spelling</span> ${formatWithTranslit(it.word, it.transliteration)}</div>
+              ${(needsLangTranslit(sourceLang) && it.transliteration) ? `<div class="word-row"><span class="row-label">${translitLabel}</span> ${esc(it.transliteration)}${it._aiTranslit ? ' <span class="auto-tag" title="AI generated">AI</span>' : ''}</div>` : ''}
               ${hasPron ? `
               <div class="word-row"><span class="row-label">Pronunciation</span>
                 <div class="pron-breakdown">
                   ${it.reading ? `<span class="pron-part" title="Reading">${esc(it.reading)}</span>` : ''}
-                  ${it.transliteration ? `<span class="pron-part" title="${translitLabel}">${esc(it.transliteration)}</span>` : ''}
                   ${it.pronunciation ? `<span class="pron-part" title="Phonetic">${esc(it.pronunciation)}</span>` : ''}
                 </div>
               </div>` : ''}
