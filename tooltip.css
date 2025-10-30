@@ -3,19 +3,20 @@
   position: absolute;
   z-index: 999999;
   background: white;
-  border-radius: 12px;
-  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.15), 0 0 0 1px rgba(0, 0, 0, 0.05);
+  border-radius: 16px;
+  box-shadow: 0 24px 64px rgba(0, 0, 0, 0.18), 0 0 0 1px rgba(0, 0, 0, 0.04);
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', sans-serif;
   font-size: 14px;
   line-height: 1.5;
-  color: #374151;
+  color: #1f2937;
   max-width: 650px;
   min-width: 550px;
   opacity: 0;
   transform: translateY(10px) scale(0.95);
-  transition: all 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
   pointer-events: none;
-  backdrop-filter: blur(10px);
+  backdrop-filter: blur(12px);
+  border: 1px solid rgba(0, 0, 0, 0.06);
 }
 
 .polyglot-tooltip.visible {
@@ -49,42 +50,44 @@
 }
 
 .polyglot-tooltip-header {
-  padding: 16px 20px 12px;
-  border-bottom: 1px solid #f3f4f6;
+  padding: 18px 22px 14px;
+  border-bottom: 1px solid #e5e7eb;
   background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
-  border-radius: 12px 12px 0 0;
+  border-radius: 16px 16px 0 0;
 }
 
 .polyglot-tooltip-title {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  margin-bottom: 12px;
+  margin-bottom: 14px;
 }
 
 .polyglot-tooltip-logo {
   display: flex;
   align-items: center;
-  gap: 8px;
-  font-weight: 600;
-  color: #4f46e5;
-  font-size: 16px;
+  gap: 10px;
+  font-weight: 700;
+  color: #1d4ed8;
+  font-size: 17px;
+  letter-spacing: -0.3px;
 }
 
 .polyglot-tooltip-close {
   background: none;
   border: none;
-  font-size: 18px;
+  font-size: 20px;
   color: #9ca3af;
   cursor: pointer;
-  padding: 4px;
-  border-radius: 4px;
+  padding: 6px;
+  border-radius: 6px;
   transition: all 0.2s ease;
+  font-weight: 500;
 }
 
 .polyglot-tooltip-close:hover {
-  background: #f3f4f6;
-  color: #374151;
+  background: #e5e7eb;
+  color: #1f2937;
 }
 
 .polyglot-tooltip-controls {
@@ -96,28 +99,30 @@
 }
 
 .polyglot-select {
-  padding: 6px 12px;
-  border: 1px solid #d1d5db;
-  border-radius: 6px;
-  font-size: 12px;
+  padding: 8px 14px;
+  border: 2px solid #d1d5db;
+  border-radius: 8px;
+  font-size: 13px;
   background: white;
-  color: #374151;
+  color: #111827;
   cursor: pointer;
   transition: all 0.2s ease;
-  min-width: 100px;
+  min-width: 110px;
   position: relative;
   z-index: 1000000;
   pointer-events: auto;
+  font-weight: 500;
 }
 
 .polyglot-select:focus {
   outline: none;
-  border-color: #4f46e5;
-  box-shadow: 0 0 0 2px rgba(79, 70, 229, 0.1);
+  border-color: #1d4ed8;
+  box-shadow: 0 0 0 3px rgba(29, 78, 216, 0.1);
 }
 
 .polyglot-select:hover {
-  border-color: #9ca3af;
+  border-color: #1d4ed8;
+  background: #f9fafb;
 }
 
 .polyglot-select option {
@@ -165,28 +170,31 @@
 }
 
 .polyglot-original-text {
-  background: #f8fafc;
-  padding: 12px 16px;
-  border-radius: 8px;
+  background: linear-gradient(135deg, #f8fafc 0%, #f1f5f9 100%);
+  padding: 14px 18px;
+  border-radius: 10px;
   margin-bottom: 0; /* Remove margin in side-by-side layout */
-  border-left: 4px solid #4f46e5;
+  border-left: 4px solid #1d4ed8;
+  border: 1px solid #e2e8f0;
+  border-left: 4px solid #1d4ed8;
 }
 
 .polyglot-original-text .label {
   font-size: 11px;
-  font-weight: 600;
-  color: #6b7280;
+  font-weight: 700;
+  color: #64748b;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
-  margin-bottom: 4px;
+  letter-spacing: 0.8px;
+  margin-bottom: 6px;
 }
 
 .polyglot-original-text .text {
-  font-weight: 500;
-  color: #374151;
+  font-weight: 600;
+  color: #0f172a;
   word-wrap: break-word;
   overflow-wrap: break-word;
   hyphens: auto;
+  line-height: 1.6;
 }
 
 .polyglot-translation-section {
@@ -195,32 +203,34 @@
 
 .polyglot-translation-text {
   font-size: 16px;
-  font-weight: 500;
+  font-weight: 600;
   color: #0f172a;
   margin-bottom: 8px;
   word-wrap: break-word;
   overflow-wrap: break-word;
   hyphens: auto;
+  line-height: 1.6;
 }
 
 .polyglot-section-title {
   font-size: 12px;
-  font-weight: 600;
-  color: #4f46e5;
+  font-weight: 700;
+  color: #1d4ed8;
   text-transform: uppercase;
-  letter-spacing: 0.5px;
-  margin-bottom: 8px;
+  letter-spacing: 0.8px;
+  margin-bottom: 10px;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
 }
 
 .polyglot-translation {
-  background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
-  padding: 16px;
-  border-radius: 8px;
-  border: 1px solid #e0f2fe;
-  margin-bottom: 12px;
+  background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+  padding: 18px;
+  border-radius: 10px;
+  border: 1px solid #bfdbfe;
+  margin-bottom: 14px;
+  box-shadow: 0 2px 8px rgba(29, 78, 216, 0.08);
 }
 
 .polyglot-translation-text {
@@ -247,13 +257,14 @@
 }
 
 .polyglot-learning-content {
-  background: #fefce8;
-  border: 1px solid #fde047;
-  border-radius: 8px;
-  padding: 16px;
-  margin-top: 12px;
+  background: linear-gradient(135deg, #fefce8 0%, #fef9c3 100%);
+  border: 2px solid #fde047;
+  border-radius: 10px;
+  padding: 18px;
+  margin-top: 14px;
   width: 100%; /* Ensure it spans full width */
   box-sizing: border-box;
+  box-shadow: 0 2px 8px rgba(250, 204, 21, 0.12);
 }
 
 /* Ensure learning content spans full width in side-by-side layout */
@@ -327,31 +338,38 @@
 
 .polyglot-button {
   flex: 1;
-  padding: 8px 12px;
-  border: 1px solid #d1d5db;
-  border-radius: 6px;
+  padding: 10px 14px;
+  border: 2px solid #d1d5db;
+  border-radius: 8px;
   background: white;
-  color: #374151;
-  font-size: 12px;
-  font-weight: 500;
+  color: #1f2937;
+  font-size: 13px;
+  font-weight: 600;
   cursor: pointer;
   transition: all 0.2s ease;
   text-align: center;
 }
 
 .polyglot-button:hover {
-  background: #f9fafb;
-  border-color: #9ca3af;
+  background: #f8fafc;
+  border-color: #1d4ed8;
+  color: #1d4ed8;
+  transform: translateY(-1px);
+  box-shadow: 0 4px 12px rgba(29, 78, 216, 0.15);
 }
 
 .polyglot-button.primary {
-  background: #4f46e5;
+  background: linear-gradient(135deg, #1d4ed8 0%, #2563eb 100%);
   color: white;
-  border-color: #4f46e5;
+  border-color: #1d4ed8;
+  box-shadow: 0 2px 8px rgba(29, 78, 216, 0.25);
 }
 
 .polyglot-button.primary:hover {
-  background: #4338ca;
+  background: linear-gradient(135deg, #1e40af 0%, #1d4ed8 100%);
+  border-color: #1e40af;
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(29, 78, 216, 0.35);
 }
 
 @keyframes spin {
@@ -745,8 +763,8 @@
 }
 
 /* Color variants to differentiate cards visually */
-.polyglot-vocabulary-analysis .word-card.color-1 { border-left-color: #10b981; }
-.polyglot-vocabulary-analysis .word-card.color-1 .word-index { background: #10b981; }
+.polyglot-vocabulary-analysis .word-card.color-1 { border-left-color: #059669; }
+.polyglot-vocabulary-analysis .word-card.color-1 .word-index { background: #059669; }
 
 /* Transliteration styling */
 .polyglot-vocabulary-analysis .word-title em,
@@ -765,17 +783,17 @@
   margin-left: 0;
 }
 
-.polyglot-vocabulary-analysis .word-card.color-2 { border-left-color: #3b82f6; }
-.polyglot-vocabulary-analysis .word-card.color-2 .word-index { background: #3b82f6; }
+.polyglot-vocabulary-analysis .word-card.color-2 { border-left-color: #1d4ed8; }
+.polyglot-vocabulary-analysis .word-card.color-2 .word-index { background: #1d4ed8; }
 
-.polyglot-vocabulary-analysis .word-card.color-3 { border-left-color: #ef4444; }
-.polyglot-vocabulary-analysis .word-card.color-3 .word-index { background: #ef4444; }
+.polyglot-vocabulary-analysis .word-card.color-3 { border-left-color: #dc2626; }
+.polyglot-vocabulary-analysis .word-card.color-3 .word-index { background: #dc2626; }
 
-.polyglot-vocabulary-analysis .word-card.color-4 { border-left-color: #f59e0b; }
-.polyglot-vocabulary-analysis .word-card.color-4 .word-index { background: #f59e0b; }
+.polyglot-vocabulary-analysis .word-card.color-4 { border-left-color: #d97706; }
+.polyglot-vocabulary-analysis .word-card.color-4 .word-index { background: #d97706; }
 
-.polyglot-vocabulary-analysis .word-card.color-5 { border-left-color: #8b5cf6; }
-.polyglot-vocabulary-analysis .word-card.color-5 .word-index { background: #8b5cf6; }
+.polyglot-vocabulary-analysis .word-card.color-5 { border-left-color: #7c3aed; }
+.polyglot-vocabulary-analysis .word-card.color-5 .word-index { background: #7c3aed; }
 
-.polyglot-vocabulary-analysis .word-card.color-6 { border-left-color: #14b8a6; }
-.polyglot-vocabulary-analysis .word-card.color-6 .word-index { background: #14b8a6; }
+.polyglot-vocabulary-analysis .word-card.color-6 { border-left-color: #0891b2; }
+.polyglot-vocabulary-analysis .word-card.color-6 .word-index { background: #0891b2; }

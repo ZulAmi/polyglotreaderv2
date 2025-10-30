@@ -1,0 +1,286 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PolyglotReader - Chrome Canary AI Test</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            color: #333;
+        }
+        
+        .container {
+            background: white;
+            border-radius: 12px;
+            padding: 30px;
+            box-shadow: 0 10px 30px rgba(0, 0, 0, 0.2);
+        }
+        
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        
+        .header h1 {
+            color: #4F46E5;
+            margin-bottom: 10px;
+        }
+        
+        .chrome-version {
+            background: #f8f9fa;
+            padding: 15px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            border-left: 4px solid #4F46E5;
+        }
+        
+        .status-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 20px;
+            margin-bottom: 30px;
+        }
+        
+        .status-card {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid #e9ecef;
+        }
+        
+        .status-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 10px;
+        }
+        
+        .status-indicator {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: #ffc107;
+        }
+        
+        .status-indicator.status-green { background: #28a745; }
+        .status-indicator.status-red { background: #dc3545; }
+        .status-indicator.status-yellow { background: #ffc107; }
+        
+        .button-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+        
+        button {
+            background: #4F46E5;
+            color: white;
+            border: none;
+            padding: 12px 20px;
+            border-radius: 6px;
+            cursor: pointer;
+            font-size: 14px;
+            transition: background 0.2s;
+        }
+        
+        button:hover {
+            background: #3730a3;
+        }
+        
+        button:disabled {
+            background: #9ca3af;
+            cursor: not-allowed;
+        }
+        
+        .test-content {
+            margin: 30px 0;
+            padding: 20px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            border: 2px dashed #dee2e6;
+        }
+        
+        .results {
+            background: #1f2937;
+            color: #f3f4f6;
+            padding: 20px;
+            border-radius: 8px;
+            max-height: 400px;
+            overflow-y: auto;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+        }
+        
+        .setup-instructions {
+            background: #fef3c7;
+            border: 1px solid #f59e0b;
+            border-radius: 8px;
+            padding: 20px;
+            margin-bottom: 20px;
+        }
+        
+        .setup-instructions h3 {
+            color: #92400e;
+            margin-top: 0;
+        }
+        
+        .flag-list {
+            list-style: none;
+            padding: 0;
+        }
+        
+        .flag-list li {
+            background: white;
+            margin: 5px 0;
+            padding: 8px 12px;
+            border-radius: 4px;
+            font-family: monospace;
+            border-left: 3px solid #4F46E5;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🧪 PolyglotReader Chrome Canary AI Test</h1>
+            <p>Test Chrome's experimental AI APIs for language learning</p>
+        </div>
+        
+        <div class="chrome-version" id="chromeInfo">
+            <strong>Chrome Version Detection:</strong> <span id="chromeVersion">Detecting...</span>
+        </div>
+        
+        <div class="setup-instructions">
+            <h3>⚠️ Setup Required for Chrome Canary</h3>
+            <p>Enable these flags in <code>chrome://flags/</code>:</p>
+            <ul class="flag-list">
+                <li>chrome://flags/#built-in-ai-api → Enabled</li>
+                <li>chrome://flags/#translation-api → Enabled</li>
+                <li>chrome://flags/#language-detection-api → Enabled</li>
+                <li>chrome://flags/#summarization-api → Enabled</li>
+                <li>chrome://flags/#writer-api → Enabled</li>
+                <li>chrome://flags/#rewriter-api → Enabled</li>
+                <li>chrome://flags/#proofreader-api → Enabled</li>
+                <li>chrome://flags/#optimization-guide-on-device-model → Enabled with Model Downloading</li>
+            </ul>
+            <p><strong>After enabling flags:</strong> Restart Chrome Canary completely!</p>
+        </div>
+        
+        <div class="status-grid">
+            <div class="status-card" id="status-language-model">
+                <div class="status-header">
+                    <strong>LanguageModel API</strong>
+                    <div class="status-indicator"></div>
+                </div>
+                <div class="status-text">Checking...</div>
+            </div>
+            
+            <div class="status-card" id="status-translator">
+                <div class="status-header">
+                    <strong>Translator API</strong>
+                    <div class="status-indicator"></div>
+                </div>
+                <div class="status-text">Checking...</div>
+            </div>
+            
+            <div class="status-card" id="status-summarizer">
+                <div class="status-header">
+                    <strong>Summarizer API</strong>
+                    <div class="status-indicator"></div>
+                </div>
+                <div class="status-text">Checking...</div>
+            </div>
+            
+            <div class="status-card" id="status-language-detector">
+                <div class="status-header">
+                    <strong>Language Detector</strong>
+                    <div class="status-indicator"></div>
+                </div>
+                <div class="status-text">Checking...</div>
+            </div>
+            
+            <div class="status-card" id="status-writer">
+                <div class="status-header">
+                    <strong>Writer API</strong>
+                    <div class="status-indicator"></div>
+                </div>
+                <div class="status-text">Checking...</div>
+            </div>
+            
+            <div class="status-card" id="status-rewriter">
+                <div class="status-header">
+                    <strong>Rewriter API</strong>
+                    <div class="status-indicator"></div>
+                </div>
+                <div class="status-text">Checking...</div>
+            </div>
+            
+            <div class="status-card" id="status-proofreader">
+                <div class="status-header">
+                    <strong>Proofreader API</strong>
+                    <div class="status-indicator"></div>
+                </div>
+                <div class="status-text">Checking...</div>
+            </div>
+        </div>
+        
+        <div class="button-grid">
+            <button id="btn-check">🔍 Check API Availability</button>
+            <button id="btn-langmodel">🤖 Test Language Model</button>
+            <button id="btn-translator">🌐 Test Translator</button>
+            <button id="btn-summarizer">📝 Test Summarizer</button>
+            <button id="btn-langdetector">🔤 Test Language Detector</button>
+            <button id="btn-writer">✍️ Test Writer</button>
+            <button id="btn-rewriter">📝 Test Rewriter</button>
+            <button id="btn-proofreader">✅ Test Proofreader</button>
+        </div>
+        
+        <div class="test-content">
+            <h3>Test Text (Select this to test the extension):</h3>
+            <p><strong>English:</strong> Hello world! This is a comprehensive test of the PolyglotReader extension with advanced AI capabilities for language learning and translation.</p>
+            <p><strong>Spanish:</strong> ¡Hola mundo! Esta es una prueba integral de la extensión PolyglotReader con capacidades avanzadas de IA para el aprendizaje de idiomas y la traducción.</p>
+            <p><strong>French:</strong> Bonjour le monde! Ceci est un test complet de l'extension PolyglotReader avec des capacités d'IA avancées pour l'apprentissage des langues et la traduction.</p>
+            <p><strong>German:</strong> Hallo Welt! Dies ist ein umfassender Test der PolyglotReader-Erweiterung mit erweiterten KI-Funktionen für das Sprachenlernen und die Übersetzung.</p>
+        </div>
+        
+        <div class="results" id="apiResults">
+            <div><strong>API Test Results will appear here...</strong></div>
+        </div>
+    </div>
+    
+    <script src="test-apis.js"></script>
+    <script>
+        // Initialize Chrome version detection
+        document.addEventListener('DOMContentLoaded', () => {
+            const userAgent = navigator.userAgent;
+            const chromeVersion = userAgent.match(/Chrome\/(\d+)/)?.[1];
+            const isCanary = userAgent.includes('Chrome') && (
+                userAgent.includes('dev') || 
+                userAgent.includes('canary') || 
+                parseInt(chromeVersion) >= 127
+            );
+            
+            const versionEl = document.getElementById('chromeVersion');
+            if (chromeVersion) {
+                const versionNum = parseInt(chromeVersion);
+                const status = versionNum >= 127 ? '✅' : '⚠️';
+                const recommendation = versionNum >= 127 ? 'Supported' : 'Upgrade recommended';
+                versionEl.innerHTML = `${status} Chrome ${chromeVersion} (${recommendation})`;
+                
+                if (versionNum < 127) {
+                    versionEl.innerHTML += '<br><small>Chrome Canary 127+ recommended for full AI API support</small>';
+                }
+            } else {
+                versionEl.innerHTML = '❌ Chrome version could not be detected';
+            }
+        });
+    </script>
+</body>
+</html>

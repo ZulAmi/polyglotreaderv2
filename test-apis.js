@@ -31,6 +31,16 @@ function logResult(id, lines) {
 async function checkAvailability() {
   try {
     console.log('\n🔍 API Availability Check (globals and legacy):');
+    
+    // Check Chrome version
+    const userAgent = navigator.userAgent;
+    const chromeVersion = userAgent.match(/Chrome\/(\d+)/)?.[1];
+    console.log(`Chrome version: ${chromeVersion || 'Unknown'}`);
+    
+    if (chromeVersion && parseInt(chromeVersion) < 127) {
+      console.warn('⚠️ Chrome 127+ recommended for full AI API support');
+    }
+    
     const availability = {
       languageModel: !!window.LanguageModel || !!window.ai?.languageModel,
       translator: !!window.Translator || !!window.ai?.translator,
@@ -62,12 +72,18 @@ async function testLanguageModel() {
   try {
     let session = null;
     if (window.LanguageModel?.create) {
-      session = await window.LanguageModel.create({ systemPrompt: 'Be brief.' });
+      session = await window.LanguageModel.create({ 
+        systemPrompt: 'Be brief.',
+        outputLanguage: 'en'
+      });
     } else if (window.ai?.languageModel?.create) {
       const caps = await window.ai.languageModel.capabilities();
       console.log('Legacy LanguageModel capabilities:', caps);
       if (caps.available !== 'readily') throw new Error('Not readily available: ' + caps.available);
-      session = await window.ai.languageModel.create({ systemPrompt: 'Be brief.' });
+      session = await window.ai.languageModel.create({ 
+        systemPrompt: 'Be brief.',
+        outputLanguage: 'en'
+      });
     } else {
       throw new Error('LanguageModel API not found');
     }
@@ -77,7 +93,13 @@ async function testLanguageModel() {
     setStatus('status-language-model', 'Working', 'green');
   } catch (e) {
     console.warn('LanguageModel test failed:', e);
-    logResult('LanguageModel Error', [e?.message || e]);
+    let errorMsg = e?.message || e;
+    if (errorMsg.includes('not have enough space')) {
+      errorMsg = '💾 Insufficient storage space for AI model';
+    } else if (errorMsg.includes('origin trial')) {
+      errorMsg = '🔧 Enable chrome://flags/#built-in-ai-api';
+    }
+    logResult('LanguageModel Error', [errorMsg]);
     setStatus('status-language-model', 'Failed', 'red');
   }
 }

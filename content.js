@@ -8,6 +8,7 @@ class PolyglotReader {
       autoDetectLanguage: true,
       showPronunciation: true,
       showExamples: true,
+      showTransliteration: true,
       // Always use all available AI APIs in vocabulary mode
       vocabUseAllApis: true,
       // Enable enrichment features (examples, rewrites, proofreading, translation)
@@ -166,6 +167,7 @@ class PolyglotReader {
             <option value="full">Detailed</option>
             <option value="adaptive">Adaptive</option>
           </select>
+          <button id="polyglot-toggle-translit" class="pg-btn pg-btn-slim" style="display:none" title="Show/Hide transliterations">Translit: ON</button>
         </div>
       </div>
       <div class="polyglot-tooltip-content">
@@ -256,6 +258,8 @@ class PolyglotReader {
         if (vocabDetailSelect) {
           vocabDetailSelect.style.display = (learningFocusSelect.value === 'vocabulary') ? '' : 'none';
         }
+        const tBtn = this.tooltip.querySelector('#polyglot-toggle-translit');
+        if (tBtn) tBtn.style.display = (learningFocusSelect.value === 'vocabulary') ? '' : 'none';
         // No summary length selector
       });
       
@@ -294,6 +298,27 @@ class PolyglotReader {
       vocabDetailSelect: !!vocabDetailSelect,
       summaryLengthSelect: !!summaryLengthSelect
     });
+
+    // Transliteration toggle
+    const tBtn = this.tooltip.querySelector('#polyglot-toggle-translit');
+    if (tBtn) {
+      const refresh = () => { tBtn.textContent = `Translit: ${this.settings.showTransliteration ? 'ON' : 'OFF'}`; };
+      refresh();
+      const focusNow = this.tooltip?.querySelector?.('#polyglot-learning-focus')?.value || this.settings.learningFocus;
+      tBtn.style.display = (focusNow === 'vocabulary') ? '' : 'none';
+      tBtn.addEventListener('click', () => {
+        this.settings.showTransliteration = !this.settings.showTransliteration;
+        window.PG = window.PG || {}; window.PG.settings = this.settings;
+        try { chrome.storage.sync.set({ showTransliteration: this.settings.showTransliteration }); } catch(_) {}
+        refresh();
+        if (this.lastVocabItems && this.lastVocabItems.length) {
+          const analysis = this.tooltip.querySelector('.polyglot-vocabulary-analysis');
+            if (analysis) {
+              analysis.innerHTML = this.renderVocabItems(this.lastVocabItems, this.lastSourceLang || 'auto');
+            }
+        }
+      });
+    }
   }
 
   // Debounce reprocessing to coalesce rapid dropdown changes into one request
@@ -323,9 +348,20 @@ class PolyglotReader {
       const targetLangForInit = targetLanguageSelect?.value || this.settings.defaultLanguage || 'es';
       // Don't block UI; fire and forget to satisfy gesture requirement
       if (currentFocus === 'translate') {
+        console.log('🔧 Pre-warming translator for translate mode...');
         window.PG?.ai?.ensureTranslatorReady?.(targetLangForInit);
       } else if (currentFocus === 'summary') {
-        window.PG?.ai?.ensureSummarizerReady?.();
+        console.log('🔧 Pre-warming summarizer for summary mode...');
+        // Use fire-and-forget to start the process, but don't block UI
+        window.PG?.ai?.ensureSummarizerReady?.().then(summarizer => {
+          if (summarizer) {
+            console.log('✅ Summarizer pre-warmed successfully');
+          } else {
+            console.log('⚠️ Summarizer pre-warming failed');
+          }
+        }).catch(err => {
+          console.log('⚠️ Summarizer pre-warming error:', err?.message || err);
+        });
         // Also warm up translator to enable summary translation to target language
         window.PG?.ai?.ensureTranslatorReady?.(targetLangForInit);
       }
@@ -412,6 +448,7 @@ class PolyglotReader {
     const learningFocusSelect = this.tooltip.querySelector('#polyglot-learning-focus');
     const vocabDetailSelect = this.tooltip.querySelector('#polyglot-vocab-detail');
     const summaryLengthSelect = this.tooltip.querySelector('#polyglot-summary-length');
+    const tBtn = this.tooltip.querySelector('#polyglot-toggle-translit');
     
     if (targetLanguageSelect) {
       targetLanguageSelect.value = this.settings.defaultLanguage;
@@ -422,6 +459,10 @@ class PolyglotReader {
     if (vocabDetailSelect) {
       vocabDetailSelect.value = this.settings.vocabStrategy || 'adaptive';
       vocabDetailSelect.style.display = (learningFocusSelect?.value === 'vocabulary') ? '' : 'none';
+    }
+    if (tBtn) {
+      tBtn.textContent = `Translit: ${this.settings.showTransliteration ? 'ON' : 'OFF'}`;
+      tBtn.style.display = (learningFocusSelect?.value === 'vocabulary') ? '' : 'none';
     }
     if (summaryLengthSelect) {
       summaryLengthSelect.value = this.settings.summaryLength || 'medium';
@@ -452,11 +493,18 @@ class PolyglotReader {
         try {
           const sessions = window.PG?.ai?.getSessions();
           if (sessions?.languageDetector) {
-            const detection = await sessions.languageDetector.detect(text);
-            const detectionResults = Array.isArray(detection) ? detection : [detection];
-            if (detectionResults.length > 0) {
-              detectedLang = detectionResults[0].detectedLanguage || detectionResults[0] || 'auto';
-              console.log(`🔍 Language detected: ${detectedLang}`);
+            // Language Detector returns array of { detectedLanguage, confidence } objects
+            // sorted by confidence (highest first)
+            const results = await sessions.languageDetector.detect(text);
+            if (results && results.length > 0) {
+              const topResult = results[0]; // Highest confidence result
+              // Only use detection if confidence is reasonably high
+              if (topResult.confidence > 0.6) {
+                detectedLang = topResult.detectedLanguage;
+                console.log(`🔍 Language detected: ${detectedLang} (confidence: ${(topResult.confidence * 100).toFixed(1)}%)`);
+              } else {
+                console.log(`⚠️ Language detection confidence too low (${(topResult.confidence * 100).toFixed(1)}%), using fallback`);
+              }
             }
           }
         } catch (error) {
@@ -504,10 +552,20 @@ class PolyglotReader {
       
       if (learningFocus === 'translate') {
         console.log('🔤 Translation mode: Running translation...');
-        // If we don't yet have a translator, try to create one now
+        // If we don't yet have a translator, try to create one now with user gesture handling
         const sessions = window.PG?.ai?.getSessions();
         if (!sessions?.translator) {
-          await window.PG?.ai?.ensureTranslatorReady?.(actualTargetLang, detectedLang);
+          try {
+            await window.PG?.ai?.ensureTranslatorReady?.(actualTargetLang, detectedLang);
+          } catch (translatorError) {
+            if (translatorError?.message?.includes('user gesture')) {
+              console.log('⚠️ Translator requires user gesture - this text selection should provide one');
+              // Text selection should have provided the user gesture, but models might still be downloading
+              this.displayResults(originalText, 'Translator is downloading models. Please try again in a moment.', '', sourceLang, targetLang, '', learningFocus, requestId);
+              return;
+            }
+            throw translatorError;
+          }
         }
         if (sessions?.translator) {
           try {
@@ -559,12 +617,18 @@ class PolyglotReader {
             }
           } catch (error) {
             console.error('Translation failed:', error);
-            translation = 'Translation not available';
+            if (error?.message?.includes('user gesture')) {
+              translation = '⚠️ Translator downloading models. Try again in a moment.';
+            } else if (error?.message?.includes('not have enough space')) {
+              translation = '💾 Insufficient storage space. Free up disk space and restart Chrome.';
+            } else {
+              translation = 'Translation not available';
+            }
           }
         } else {
           // Fallback when no translator API is available or creation requires a gesture
-          translation = `[Translation unavailable] ${text}`;
-          console.log('⚠️ No translation API available, showing original text');
+          translation = '🔧 Enable Chrome AI flags and restart browser. See extension setup guide.';
+          console.log('⚠️ No translation API available, showing setup message');
         }
 
         // Get pronunciation if enabled
@@ -931,6 +995,38 @@ Return valid JSON only:`;
         console.log('AI transliteration error:', etOuter?.message || etOuter); 
       }
 
+      // AI-based transliteration for example sentences (only where needed)
+      try {
+        const withExampleTrans = await window.PG?.vocab?.ensureExampleTransliterationAI?.(this.lastVocabItems, sourceLang, targetLang);
+        if (withExampleTrans && withExampleTrans !== this.lastVocabItems) {
+          const changed = [];
+            withExampleTrans.forEach((item, idx) => {
+              if (item.exampleTranslit && item.exampleTranslit !== this.lastVocabItems[idx]?.exampleTranslit) {
+                changed.push(idx);
+              }
+            });
+          this.lastVocabItems = withExampleTrans;
+          if (changed.length && requestId === this.activeRequestId) {
+            const analysis = container.querySelector('.polyglot-vocabulary-analysis');
+            changed.forEach(idx => {
+              const card = analysis?.querySelector(`.word-card[data-idx="${idx}"]`);
+              if (card) {
+                const tmp = document.createElement('div');
+                tmp.innerHTML = this.renderVocabItems([this.lastVocabItems[idx]], sourceLang);
+                const newCard = tmp.querySelector('.word-card');
+                if (newCard) {
+                  card.innerHTML = newCard.innerHTML;
+                  const badge = card.querySelector('.word-index');
+                  if (badge) badge.textContent = String(idx + 1);
+                }
+              }
+            });
+          }
+        }
+      } catch (eEx) {
+        console.log('AI example sentence transliteration error:', eEx?.message || eEx);
+      }
+
       // Skip additional enrichment if items already have good detail from the live fetch
       const hasGoodDetail = this.lastVocabItems.every(item => 
         item.def && item.def.length > 5 && 
@@ -1291,7 +1387,27 @@ Format with clear headings, bullet points, and detailed explanations. Provide co
       return focus === 'translate' ? '' : 'Learning content not available - Chrome AI Language Model required';
     } catch (error) {
       console.error(`${focus} analysis failed:`, error);
-      return focus === 'translate' ? '' : `${focus} analysis failed`;
+      
+      // Provide more helpful error messages for users
+      const errorMsg = error?.message || `${focus} analysis failed`;
+      if (focus === 'translate') {
+        return '';
+      } else if (focus === 'summary') {
+        // Show a more helpful summary error message
+        if (errorMsg.includes('Chrome 138+')) {
+          return '🔄 Update Chrome to version 138+ for AI summary features';
+        } else if (errorMsg.includes('storage space') || errorMsg.includes('22GB')) {
+          return '💾 Free up storage space (22GB+ needed) for AI summaries';
+        } else if (errorMsg.includes('user gesture') || errorMsg.includes('Select text')) {
+          return '👆 Select text again to activate AI summary features';
+        } else if (errorMsg.includes('downloading') || errorMsg.includes('Try again')) {
+          return '⏳ AI models downloading. Try again in a moment...';
+        } else {
+          return '⚙️ AI summary unavailable. Check Chrome version and settings.';
+        }
+      } else {
+        return `⚠️ ${focus} analysis unavailable`;
+      }
     }
   }
 
@@ -1583,7 +1699,7 @@ Format with clear headings, bullet points, and detailed explanations. Provide co
           <div class="polyglot-summary-section polyglot-fade-in">
             <div class="polyglot-section-title">
               <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-                <path d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+                <path d="M9 12h6M9 16h6M7 3h10a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2z" stroke="currentColor" stroke-width="2" fill="none"/>
               </svg>
               Summary
             </div>

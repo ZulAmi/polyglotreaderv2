@@ -1,150 +1,205 @@
-# PolyglotReader — AI Language Learning Chrome Extension
+# PolyglotReader - AI Language Learning Chrome Extension
 
-A professional language learning Chrome extension that leverages Chrome’s on‑device AI APIs for fast translation, vocabulary, grammar, and verb analysis — all inside a sleek, side‑by‑side tooltip UI on any page.
+A Chrome extension for learning languages while you browse the web. Built for the Google Chrome Built-in AI Challenge 2025, it uses Chrome's on-device AI models (including Gemini Nano) to give you instant translations, vocabulary help, grammar explanations, and verb conjugations right on any webpage.
 
-## Highlights
+## What It Does
 
-- Streaming translation (sentence‑by‑sentence) when supported by the Translator API
-- 4 learning modes with strict mode isolation:
-  - Translate (clean translation only)
-  - Vocabulary (definitions/examples)
-  - Grammar (structure and corrections)
-  - Verbs (tenses and conjugation notes)
-- Side‑by‑side tooltip layout (original vs. results) with copy‑to‑clipboard
-- Smart language detection with robust character fallback
-- Vocabulary detail strategy: Adaptive by default (Fast / Detailed / Adaptive switcher in the tooltip)
-- Built‑in caching + in‑flight de‑duplication to avoid duplicate work
-- Request lifecycle guards to prevent stale UI updates when switching focus
-- 12 languages: en, es, fr, de, it, pt, ru, zh, ja, ko, ar, hi
-- All processing is local to Chrome’s on‑device AI (no external servers)
+Reading something in a foreign language? Just highlight the text and PolyglotReader shows you a helpful tooltip with exactly what you need. Want a translation? You got it. Need to understand tricky vocabulary? It's there. Wondering about grammar or verb forms? Covered. Everything runs locally on your device, so it's fast and private.
+
+Currently supports 12 languages: English, Spanish, French, German, Italian, Portuguese, Russian, Chinese, Japanese, Korean, Arabic, and Hindi. All the AI magic happens right in Chrome, so your data stays on your device and works offline once you've downloaded the models.
+
+## Chrome AI APIs Used
+
+This extension uses six different Chrome AI APIs working together:
+
+**Stable APIs (Chrome 138+)**
+
+- **Translator API**: Handles the actual translation, supports streaming for longer text
+- **Summarizer API**: Creates quick summaries of what you selected
+- **Language Detector API**: Figures out what language you're looking at
+
+**Origin Trial APIs**
+
+- **Prompt API (LanguageModel)**: Powers the vocabulary analysis, grammar help, and general learning stuff using Gemini Nano
+- **Writer API**: Helps generate example sentences
+- **Rewriter API**: Makes explanations clearer when needed
+- **Proofreader API**: Double-checks grammar corrections
+
+Why use all these APIs together? Because running everything on your device means it's faster, more private, and doesn't cost you API credits. Plus it works offline.
+
+## Features
+
+### Four Learning Modes
+
+- **Translate Mode**: Straightforward translation with optional pronunciation and streaming for longer text
+- **Vocabulary Mode**: Deep dive into words with definitions, pronunciation, examples, synonyms, and difficulty levels
+- **Grammar Mode**: Breaks down sentence structure, shows corrections, explains patterns
+- **Verbs Mode**: Conjugation tables, tense info, and usage examples
+
+### Smart Stuff
+
+- Auto-detects languages (works with non-Latin scripts too)
+- Adjusts detail level based on how much text you select
+- Falls back gracefully when certain languages aren't supported by specific APIs
+- Caches results so you don't waste time on repeat requests
+
+### Clean Interface
+
+- Side-by-side view of original text and translation
+- Copy button for saving translations
+- Settings to customize language defaults and display options
+- Works on any website
 
 ## Installation
 
-1. Download or clone this repository
-2. Open Chrome and go to `chrome://extensions/`
-3. Enable “Developer mode” in the top right
-4. Click “Load unpacked” and select this folder
-5. The PolyglotReader icon should appear in your toolbar
+**What You Need**
 
-## Enable Chrome AI APIs (Canary/Dev builds)
+- Chrome Canary 138+
+- At least 22GB free disk space (AI models are chunky)
+- Windows, macOS, or Linux
 
-Chrome’s AI APIs are experimental and often gated behind flags. See CHROME_AI_SETUP.md for step‑by‑step instructions to enable:
+**Setup**
 
-- Prompt API for on‑device model
-- Translator API (and optional sentence streaming)
-- Optimization Guide On Device Model (component download)
+1. Make sure you have 22GB+ free space
+2. Download or clone this repo
+3. Open Chrome Canary and go to chrome://extensions/
+4. Turn on "Developer mode" (top right)
+5. Click "Load unpacked" and pick the polyglotreader folder
+6. Done! Icon should show up in your toolbar
 
-Tip: The Translator may require a user gesture while its model is “downloadable/downloading.” Selecting text (mouseup) satisfies this.
+**Enabling the AI APIs**
+
+The APIs need some flags enabled in Chrome Canary:
+
+1. Go to chrome://flags/
+2. Enable these:
+   - Prompt API for Gemini Nano
+   - Summarizer API
+   - Translation API
+   - Language Detection API
+   - Optimization Guide On Device Model (set to Enabled BypassPerfRequirement)
+3. Restart Chrome (fully close it, don't just close tabs)
+4. Go to chrome://components/ and find "Optimization Guide On Device Model"
+5. Click "Check for update" to download Gemini Nano (about 1.7GB)
+6. Wait for it to finish
+
+Check CHROME_AI_SETUP.md for more detailed setup help if you need it.
 
 ## Usage
 
-1. Navigate to any webpage and highlight 2–500 characters of text
-2. The tooltip appears near the selection
-3. Pick a target language and a learning focus (Translate, Vocabulary, Grammar, Verbs)
-4. View streaming translation (Translate mode) or learning analysis (other modes)
-5. Use “Copy Translation” in Translate mode; pronunciation is optional via settings
+1. Go to any webpage with foreign language text
+2. Highlight some text (between 2-500 characters)
+3. Tooltip pops up automatically
+4. Pick your target language
+5. Choose a mode (Translate, Vocabulary, Grammar, or Verbs)
+6. Get instant AI analysis
+7. Copy the translation if you want to save it
 
-Notes
+Your preferences stick around between sessions. Click the extension icon to change default settings.
 
-- Translate runs only in Translate focus. Other focuses skip translation by design.
-- Vocabulary defaults to Adaptive: short selections get Detailed analysis; long selections use a Fast compact JSON path with local pretty rendering. You can switch between Fast / Detailed / Adaptive from the tooltip.
-- Rapid dropdown changes are debounced; repeated requests for identical inputs are cached.
+## How It Works
 
-## Settings (popup)
-
-- Default translation language
-- Preferred learning focus
-- Auto‑detect source language
-- Show pronunciation guide
-- Show example sentences (for vocabulary)
-
-Your settings are saved in Chrome storage and applied to the tooltip.
-
-## Permissions
-
-- `activeTab` — enable the tooltip and content processing on the active page
-- `storage` — save user settings
-- `host_permissions: <all_urls>` — allow the tooltip to work on any site
-
-## File structure
+**Files**
 
 ```
 polyglotreader/
-├── manifest.json              # Extension configuration and permissions
-├── background.js              # Extension lifecycle plumbing (AI runs in content)
-├── content.js                 # Selection handling, AI integration, tooltip UI
-├── tooltip.css                # Tooltip styles (side‑by‑side layout, vocab cards)
-├── popup.html | popup.js | popup.css  # Settings UI
-├── CHROME_AI_SETUP.md         # How to enable Chrome AI APIs
-├── test.html                  # Simple test page
-├── enhanced-test.html         # Enhanced interactive test page
-├── test-apis.js               # Quick API sanity test in a page
-├── validate-extension.js      # Node script to validate packaging
-└── icons/                     # Extension icons
+├── manifest.json              Config and trial tokens
+├── background.js              Service worker
+├── content.js                 Handles text selection and tooltip
+├── ai-utils.js                Manages AI API sessions
+├── ai-enhanced.js             Higher-level AI stuff and caching
+├── lang-utils.js              Language detection logic
+├── vocab-utils.js             Vocabulary formatting
+├── tooltip.css                Tooltip styles
+├── popup.html/js/css          Settings UI
+└── icons/                     Extension icons
 ```
 
-## Chrome AI APIs used
+**Behind the Scenes**
 
-New APIs
+1. Detects the language of your selected text
+2. Initializes the AI APIs you need based on your chosen mode
+3. Caches results so repeated requests are instant
+4. Falls back gracefully when something's not available
 
-- `window.LanguageModel` — general prompting and analysis
-- `window.Translator` — translation (+ optional sentence streaming)
+Translation tries streaming first for better UX, but falls back to regular mode if needed. Vocabulary mode is adaptive: quick for long selections, detailed for short ones.
 
-## Privacy
+## Privacy and Performance
 
-- No data is sent to external servers by this extension
-- All AI processing happens locally in Chrome (on‑device model)
-- Settings are stored with Chrome’s storage API
-- No tracking or analytics
+**Privacy**
 
-## Troubleshooting
+- Everything runs locally on your device
+- Nothing gets sent to external servers
+- Settings saved locally in Chrome
+- No tracking or data collection
 
-AI APIs not working
+**Performance**
 
-- Use Chrome Canary/Dev 121+ and enable the flags in CHROME_AI_SETUP.md
-- After enabling flags, visit `chrome://components/` and update the on‑device model
-- Open DevTools console to see detailed API availability logs
+- Only loads AI sessions when needed to save memory
+- Caches results so you don't process the same text twice
+- Handles rapid changes without getting confused
+- Models download once and stick around
 
-Tooltip not appearing
+**Offline**
+Most stuff works offline once you've downloaded the models. Translation needs internet for downloading language-specific models first, but vocabulary, grammar, and verb modes work completely offline.
 
-- Ensure you highlighted 2–500 characters
-- Check the console for any content‑script errors
-- Make sure the site isn’t blocking third‑party scripts or selections
+## Why This Project
 
-Translator requires a gesture
+Built for the Google Chrome Built-in AI Challenge 2025. Here's how it fits:
 
-- Select text to provide a user gesture; the extension lazily creates the Translator then
+**API Integration**: Uses six Chrome AI APIs together (Translator, Summarizer, Language Detector, Prompt/LanguageModel, Writer, Rewriter, Proofreader), each doing what it does best.
 
-Vocabulary seems slow
+**Problem It Solves**: Ever tried learning a language while reading online? You have to keep switching tabs to look stuff up. This brings everything right to where you're reading.
 
-- The extension now uses a fast JSON path by default and caches results
-- Rapid focus/language changes are debounced; repeated inputs are served from cache
+**User Experience**: Instant results, clean interface, everything adapts to what you need. No waiting, no context switching.
 
-Streaming not happening
+**Technical Approach**: Shows what you can do when APIs work together, handles edge cases gracefully, adapts processing based on what you select.
 
-- Ensure the Translator streaming flag is enabled (see CHROME_AI_SETUP.md)
-- Some language pairs or builds may not support streaming yet; the code falls back gracefully
+**Scalability**: Works with 12 languages and four learning modes. Easy to add more.
+
+## Limitations
+
+- Summarizer only works with English, Spanish, and Japanese right now (falls back to LanguageModel for others)
+- Not all language pairs support streaming translation yet
+- First model download is big and takes a while
+- Performance depends on your computer
+
+## Future Ideas
+
+- Track vocabulary with spaced repetition
+- Personal difficulty ratings based on what you struggle with
+- Audio pronunciation
+- Export your saved words and phrases
+- Connect with other language learning apps
 
 ## Contributing
 
-PRs welcome! Ideas, bug reports, and docs improvements are appreciated.
+Found a bug? Have an idea? Open an issue or submit a pull request. Just keep the code clean and document what you add.
 
 ## License
 
 MIT License
 
-## Changelog
+## Thanks
 
-### v1.1.0
+Built for the Google Chrome Built-in AI Challenge 2025. Big thanks to the Chrome team for making these AI APIs available and actually useful.
 
-- Streaming translation UI with sentence‑by‑sentence updates
-- Mode isolation (translate vs. learning); side‑by‑side tooltip
-- Fast vocabulary strategy (compact JSON) + local pretty render
-- Caching and in‑flight de‑duplication; debounced dropdown changes
-- Request lifecycle guards to avoid stale renders
-- LanguageModel warm‑up to reduce first‑token latency
-- Removed “More Details” button from UI
+## Dev Notes
 
-### v1.0.0
+**Version**
 
-- Initial release with Chrome AI integrations and tooltip interface
+v1.0.0 - Initial release with all the main features
+
+**Testing**
+
+Test files included:
+
+- test.html: Basic selection testing
+- enhanced-test.html: Try out features
+- test-apis.js: Check if APIs are working
+
+Run validate-extension.js (Node.js) to validate before submitting.
+
+**Compatibility**
+
+Needs Chrome Canary 138+ with flags enabled right now. When these APIs go stable, the flags won't be needed.

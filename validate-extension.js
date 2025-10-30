@@ -47,7 +47,7 @@ console.log('3. Click "Load unpacked"');
 console.log('4. Select this folder: ' + process.cwd());
 console.log('5. Test on any webpage by highlighting text');
 
-console.log('\n⚠️  Important Notes:');
-console.log('- Chrome AI APIs require Chrome 121+ with experimental features enabled');
-console.log('- Some AI features may not work until Chrome AI APIs are fully released');
+console.log('⚠️  Important Notes:');
+console.log('- Chrome AI APIs require Chrome Canary 127+ with experimental features enabled');
+console.log('- Enable required flags in chrome://flags/ (see CHROME_AI_SETUP.md)');
 console.log('- Extension will gracefully fallback when AI APIs are unavailable');

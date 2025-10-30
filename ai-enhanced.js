@@ -21,7 +21,12 @@ window.PG.aiEnhanced.ensureTranslatorReady = async function(targetLang, sourceLa
 
 // Ensure Summarizer is ready
 window.PG.aiEnhanced.ensureSummarizerReady = async function() {
-  try { return await window.PG?.ai?.ensureSummarizerReady?.(); } catch (e) { console.log('Summarizer (enhanced) failed:', e?.message || e); return null; }
+  try { 
+    return await window.PG?.ai?.ensureSummarizerReady?.(); 
+  } catch (e) { 
+    console.log('Summarizer (enhanced) failed:', e?.message || e); 
+    throw e; // Re-throw to preserve error details
+  }
 };
 
 // Vocabulary Processing Functions
@@ -33,9 +38,17 @@ window.PG.aiEnhanced.enrichVocabularyItems = async function(items, options = {})
     return [];
   }
   
+  // Ensure AI APIs are initialized
+  try {
+    await window.PG?.ai?.initializeAIAPIs?.();
+  } catch (e) {
+    console.log('⚠️ AI initialization failed:', e?.message || e);
+  }
+  
   const sessions = window.PG.aiEnhanced.getSessions();
   if (!sessions?.languageModel && !sessions?.writer && !sessions?.rewriter) {
     console.log('⚠️ Cannot enrich vocabulary - no AI APIs available');
+    console.log('Available sessions:', Object.keys(sessions || {}).filter(k => sessions[k]));
     return items;
   }
   
@@ -50,11 +63,18 @@ window.PG.aiEnhanced.enrichVocabularyItems = async function(items, options = {})
       const sampleItem = items.find(item => item.word || item.example) || items[0];
       const sampleText = sampleItem?.example || sampleItem?.word || '';
       if (sampleText) {
-        const det = await sessions.languageDetector.detect(sampleText);
-        const detectedLang = String(det?.detectedLanguage || det?.language || det || '').toLowerCase();
-        if (detectedLang) {
-          resolvedSourceLang = detectedLang;
-          console.log(`🔍 Resolved source language for batch: ${resolvedSourceLang}`);
+        // Language Detector returns an array of { detectedLanguage, confidence } objects
+        // sorted by confidence (highest first)
+        const results = await sessions.languageDetector.detect(sampleText);
+        if (results && results.length > 0) {
+          const topResult = results[0]; // Highest confidence result
+          // Only use detection if confidence is reasonably high
+          if (topResult.confidence > 0.6) {
+            resolvedSourceLang = topResult.detectedLanguage.toLowerCase();
+            console.log(`🔍 Resolved source language for batch: ${resolvedSourceLang} (confidence: ${(topResult.confidence * 100).toFixed(1)}%)`);
+          } else {
+            console.log(`⚠️ Language detection confidence too low (${(topResult.confidence * 100).toFixed(1)}%), using fallback`);
+          }
         }
       }
     } catch (e) {
@@ -215,11 +235,13 @@ window.PG.aiEnhanced.enrichSingleItem = async function(item, options = {}) {
     let exampleLangMismatch = false;
     if (!needsExample && updated.example && !resolvedSourceLang && sessions?.languageDetector?.detect && effectiveSourceLang && effectiveSourceLang !== 'auto') {
       try {
-        const det = await sessions.languageDetector.detect(updated.example);
-        const outCode = String(det?.detectedLanguage || det?.language || det || '').toLowerCase();
-        const srcCode = String(effectiveSourceLang).toLowerCase();
-        if (outCode && srcCode && outCode !== srcCode) {
-          exampleLangMismatch = true;
+        const results = await sessions.languageDetector.detect(updated.example);
+        if (results && results.length > 0 && results[0].confidence > 0.6) {
+          const outCode = results[0].detectedLanguage.toLowerCase();
+          const srcCode = String(effectiveSourceLang).toLowerCase();
+          if (outCode && srcCode && outCode !== srcCode) {
+            exampleLangMismatch = true;
+          }
         }
       } catch (_) { /* best effort */ }
     }
@@ -358,27 +380,66 @@ window.PG.aiEnhanced.enrichSingleItem = async function(item, options = {}) {
 
 // Summary Generation Functions
 window.PG.aiEnhanced.generateSummary = async function(text, targetLang, sourceLang) {
-  const sessions = window.PG.aiEnhanced.getSessions();
+  // Summarizer API only supports: en, es, ja (as of Chrome 138+)
+  // For other languages, use LanguageModel directly
+  const summarizerSupportedLanguages = ['en', 'es', 'ja'];
+  const useLanguageModelFallback = sourceLang && !summarizerSupportedLanguages.includes(sourceLang);
   
-  // Try Language Model first for better language control
+  if (useLanguageModelFallback) {
+    console.log(`📄 Source language "${sourceLang}" not supported by Summarizer API. Using LanguageModel directly.`);
+    const sessions = window.PG.aiEnhanced.getSessions();
+    if (sessions?.languageModel) {
+      return await window.PG.aiEnhanced.generateSummaryWithLanguageModel(text, targetLang, sourceLang);
+    }
+  }
+  
+  // Try Summarizer API for supported languages
+  console.log('📄 Attempting to initialize summarizer for summary generation...');
+  
+  try {
+    const summarizer = await window.PG.aiEnhanced.ensureSummarizerReady();
+    if (summarizer) {
+      console.log('✅ Summarizer ready, generating summary...');
+      return await window.PG.aiEnhanced.generateSummaryWithSummarizer(text, targetLang, sourceLang);
+    }
+  } catch (error) {
+    console.log('⚠️ Summarizer initialization failed:', error?.message || error);
+    
+    // If it's a storage or Chrome version error, throw it immediately (don't try fallbacks)
+    const errorMsg = error?.message || '';
+    if (errorMsg.includes('storage space') || errorMsg.includes('22GB') || 
+        errorMsg.includes('Chrome 138+') || errorMsg.includes('unavailable')) {
+      throw error; // Re-throw storage/version errors immediately
+    }
+    // For other errors, continue to fallback
+  }
+  
+  // Try Language Model as fallback
+  const sessions = window.PG.aiEnhanced.getSessions();
   if (sessions?.languageModel) {
     try {
+      console.log('🔄 Trying Language Model fallback for summary...');
       return await window.PG.aiEnhanced.generateSummaryWithLanguageModel(text, targetLang, sourceLang);
     } catch (error) {
-      console.log('⚠️ Language Model summary failed, trying Summarizer fallback:', error?.message || error);
+      console.log('⚠️ Language Model summary also failed:', error?.message || error);
     }
   }
   
-  // Fallback to Summarizer API
-  if (sessions?.summarizer) {
-    try {
-      return await window.PG.aiEnhanced.generateSummaryWithSummarizer(text, targetLang, sourceLang);
-    } catch (error) {
-      console.log('⚠️ Summarizer fallback also failed:', error?.message || error);
-    }
+  // If we get here, both summarizer and language model failed
+  const chromeVersion = navigator.userAgent.match(/Chrome\/(\d+)/)?.[1];
+  let errorMsg = 'Summary not available. ';
+  
+  if (!chromeVersion || parseInt(chromeVersion) < 138) {
+    errorMsg += `Update to Chrome 138+ for stable AI APIs. Current: ${chromeVersion || 'unknown'}`;
+  } else if (!navigator.userActivation?.isActive) {
+    errorMsg += 'Select text to provide user gesture for AI model initialization.';
+  } else if (!window.Summarizer && !window.ai?.summarizer && !window.LanguageModel && !window.ai?.languageModel) {
+    errorMsg += 'AI APIs not found. Enable chrome://flags/#built-in-ai-api and restart browser.';
+  } else {
+    errorMsg += 'AI models may be downloading. Try again in a moment or check storage space (22GB+ required).';
   }
   
-  throw new Error('Summary not available. Ensure user gesture occurred and your browser supports Language Model or Summarizer APIs.');
+  throw new Error(errorMsg);
 };
 
 window.PG.aiEnhanced.generateSummaryWithLanguageModel = async function(text, targetLang, sourceLang) {
@@ -445,8 +506,26 @@ Provide the summary entirely in ${sourceLangName}.`;
 window.PG.aiEnhanced.generateSummaryWithSummarizer = async function(text, targetLang, sourceLang) {
   const sessions = window.PG.aiEnhanced.getSessions();
   
-  console.log('🔍 Falling back to Summarizer API (limited language control)');
-  const result = await sessions.summarizer.summarize(text);
+  if (!sessions?.summarizer) {
+    throw new Error('Summarizer session not available. Ensure initialization completed.');
+  }
+  
+  console.log('🔍 Using Summarizer API for summary generation');
+  
+  // Build context to improve summarization quality
+  const contextParts = [];
+  if (sourceLang && sourceLang !== 'auto') {
+    contextParts.push(`Source language: ${sourceLang}`);
+  }
+  if (targetLang) {
+    contextParts.push(`Target audience language: ${targetLang}`);
+  }
+  contextParts.push('Summarize key points clearly and concisely');
+  
+  const context = contextParts.join('. ');
+  
+  // Use context parameter for better summarization (Chrome 138+)
+  const result = await sessions.summarizer.summarize(text, { context });
   const rawSummary = result?.summary || result || 'Summary not available';
   const condensed = window.PG.aiEnhanced.condenseSummary(rawSummary, { maxBullets: 5, maxSentences: 3, charCap: 500 });
   
