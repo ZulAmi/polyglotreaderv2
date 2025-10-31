@@ -138,7 +138,8 @@
         if (window.LanguageModel?.create) {
           try {
             aiApis.languageModel = await window.LanguageModel.create({ 
-              systemPrompt: 'Be concise.'
+              systemPrompt: 'Be concise.',
+              outputLanguage: 'en'  // Specify output language for optimal quality
             });
           } catch(e){ 
             console.log('LanguageModel (new) create failed:', e?.message || e);
@@ -154,7 +155,8 @@
             const caps = await window.ai.languageModel.capabilities?.();
             if (!caps || ['readily','after-download','downloadable'].includes(caps.available)) {
               aiApis.languageModel = await window.ai.languageModel.create({ 
-                systemPrompt: 'Be concise.'
+                systemPrompt: 'Be concise.',
+                outputLanguage: 'en'  // Specify output language for optimal quality
               });
             }
           } catch(e){ 
@@ -360,12 +362,13 @@
       if (window.Writer?.create) {
         try { 
           // Writer API with language parameters (origin trial)
-          // Support all dropdown languages: en, es, fr, de, it, pt, ru, zh, ja, ko, ar, hi
+          // NOTE: Writer API only supports en, es, ja as of Chrome 138+
+          // Other languages will be handled by LanguageModel
           aiApis.writer = await window.Writer.create({
             tone: 'neutral',
             format: 'plain-text',
             length: 'short',
-            expectedInputLanguages: ['en', 'es', 'fr', 'de', 'it', 'pt', 'ru', 'zh', 'ja', 'ko', 'ar', 'hi'],
+            expectedInputLanguages: ['en', 'es', 'ja'],
             expectedContextLanguages: ['en'],
             outputLanguage: 'en'
           }); 
@@ -387,12 +390,13 @@
       if (window.Rewriter?.create) {
         try { 
           // Rewriter API with language parameters (origin trial)
-          // Support all dropdown languages: en, es, fr, de, it, pt, ru, zh, ja, ko, ar, hi
+          // NOTE: Rewriter API only supports en, es, ja as of Chrome 138+
+          // Other languages will be handled by LanguageModel
           aiApis.rewriter = await window.Rewriter.create({
             tone: 'as-is',
             format: 'plain-text',
             length: 'as-is',
-            expectedInputLanguages: ['en', 'es', 'fr', 'de', 'it', 'pt', 'ru', 'zh', 'ja', 'ko', 'ar', 'hi'],
+            expectedInputLanguages: ['en', 'es', 'ja'],
             expectedContextLanguages: ['en'],
             outputLanguage: 'en'
           }); 
@@ -414,9 +418,10 @@
       if (window.Proofreader?.create) {
         try { 
           // Proofreader API with language parameters (origin trial)
-          // Support all dropdown languages: en, es, fr, de, it, pt, ru, zh, ja, ko, ar, hi
+          // NOTE: Proofreader API only supports English (en) as of Chrome 144+
+          // Other languages will be handled by LanguageModel
           aiApis.proofreader = await window.Proofreader.create({
-            expectedInputLanguages: ['en', 'es', 'fr', 'de', 'it', 'pt', 'ru', 'zh', 'ja', 'ko', 'ar', 'hi']
+            expectedInputLanguages: ['en']
           }); 
           PG.ai.logAPIStatus(); 
           return aiApis.proofreader; 

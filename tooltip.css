@@ -705,6 +705,36 @@
 .polyglot-vocabulary-analysis .word-section:first-of-type {
   margin-top: 1px;
 }
+
+/* Translation section - highlighted box at top of each word card */
+.polyglot-vocabulary-analysis .word-translation-section {
+  background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
+  border: 1px solid #3b82f6;
+  border-radius: 8px;
+  padding: 12px 16px;
+  margin: 12px 0 16px 0;
+  box-shadow: 0 2px 8px rgba(59, 130, 246, 0.08);
+}
+
+.polyglot-vocabulary-analysis .word-translation-section .word-row {
+  margin: 6px 0;
+  font-size: 15px;
+}
+
+.polyglot-vocabulary-analysis .word-translation-section .word-row:first-child {
+  margin-top: 0;
+}
+
+.polyglot-vocabulary-analysis .word-translation-section .word-row:last-child {
+  margin-bottom: 0;
+}
+
+.polyglot-vocabulary-analysis .word-translation-section .row-label {
+  color: #1e40af;
+  font-weight: 600;
+  min-width: 90px;
+}
+
 .polyglot-vocabulary-analysis .section-title {
   font-size: 14px;
   font-weight: 700;

@@ -43,7 +43,18 @@ class PolyglotReader {
     try { this.loadSettingsFromSync(); } catch (_) {}
     // Fire-and-forget async init
     try { this.loadVocabList(); } catch (_) {}
-  try { window.PG?.ai?.initializeAIAPIs?.(); } catch (_) {}
+    // Initialize AI APIs asynchronously (don't block constructor)
+    this.initializeAI();
+  }
+
+  // Async AI initialization
+  async initializeAI() {
+    try {
+      await window.PG?.ai?.initializeAIAPIs?.();
+      console.log('✅ AI APIs initialized successfully');
+    } catch (err) {
+      console.log('⚠️ AI initialization error:', err?.message || err);
+    }
   }
 
 
@@ -484,6 +495,13 @@ class PolyglotReader {
     `;
 
     try {
+      // Ensure AI APIs are initialized before processing
+      try {
+        await window.PG?.ai?.initializeAIAPIs?.();
+      } catch (initErr) {
+        console.log('AI initialization warning:', initErr?.message || initErr);
+      }
+
       const targetLang = this.tooltip.querySelector('#polyglot-target-language').value;
       const learningFocus = this.tooltip.querySelector('#polyglot-learning-focus').value;
 
@@ -687,16 +705,42 @@ class PolyglotReader {
 
           // Fire-and-forget live vocabulary pipeline
           this.startVocabularyLive(text, actualSourceLang, actualTargetLang, requestId).catch(err => {
-            console.log('⚠️ Live vocabulary pipeline failed, falling back:', err?.message || err);
-            // As a fallback, attempt the old single-shot vocabulary generation (won't be concurrent)
-            (async () => {
-              try {
-                const fallback = await this.getLearningContent(text, actualTargetLang, 'vocabulary', actualSourceLang);
-                if (requestId !== this.activeRequestId) return;
-                const container = this.tooltip.querySelector('#pg-vocab-live');
-                if (container) container.innerHTML = String(fallback || '');
-              } catch (_) { /* ignore */ }
-            })();
+            console.log('⚠️ Live vocabulary pipeline failed:', err?.message || err);
+            if (requestId !== this.activeRequestId) return;
+            
+            const container = this.tooltip.querySelector('#pg-vocab-live');
+            if (!container) return;
+            
+            // Show helpful error message
+            const errorMsg = String(err?.message || err);
+            if (errorMsg.includes('Language Model not available') || errorMsg.includes('not available')) {
+              container.innerHTML = `
+                <div class="polyglot-error">
+                  <strong>Language Model Not Available</strong>
+                  <p>Please ensure:</p>
+                  <ul style="text-align: left; margin: 8px 0; padding-left: 20px;">
+                    <li>Chrome AI flags are enabled in chrome://flags/</li>
+                    <li>Gemini Nano model is downloaded (chrome://components/)</li>
+                    <li>Chrome is restarted after enabling flags</li>
+                  </ul>
+                  <p style="margin-top: 8px; font-size: 11px;">See CHROME_AI_SETUP.md for detailed instructions.</p>
+                </div>
+              `;
+            } else {
+              // Try fallback to old vocabulary generation
+              (async () => {
+                try {
+                  const fallback = await this.getLearningContent(text, actualTargetLang, 'vocabulary', actualSourceLang);
+                  if (requestId !== this.activeRequestId) return;
+                  if (container) container.innerHTML = String(fallback || '');
+                } catch (fallbackErr) {
+                  console.log('Fallback also failed:', fallbackErr?.message || fallbackErr);
+                  if (container) {
+                    container.innerHTML = `<div class="polyglot-error">Vocabulary analysis failed. ${this.escapeHTML(String(fallbackErr?.message || 'Unknown error'))}</div>`;
+                  }
+                }
+              })();
+            }
           });
 
           return; // We already rendered and started the pipeline
@@ -747,7 +791,9 @@ class PolyglotReader {
     try {
       if (requestId !== this.activeRequestId) return; // stale guard
       const liveSessions = window.PG?.ai?.getSessions();
-      if (!liveSessions?.languageModel) throw new Error('Language Model not available');
+      if (!liveSessions?.languageModel) {
+        throw new Error('Language Model not available. Please ensure Chrome AI APIs are enabled and models are downloaded.');
+      }
       // Proactively warm up all AI APIs to ensure they are used in vocabulary mode
       try {
         // Fire-and-forget; do not block UI
@@ -774,7 +820,7 @@ Text: """${sample}"""`;
 
       let seeds = [];
       try {
-        const raw = await liveSessions.languageModel.prompt(seedPrompt, { language: langCode });
+        const raw = await liveSessions.languageModel.prompt(seedPrompt, { outputLanguage: langCode });
         const clean = String(raw || '').trim().replace(/^```json\s*|^```|```$/g, '').trim();
         const arr = JSON.parse(clean);
         if (Array.isArray(arr)) {
@@ -827,7 +873,7 @@ Text context: """${sample}"""
 
 Return valid JSON only:`;
         try {
-          const raw = await liveSessions.languageModel.prompt(detailPrompt, { language: langCode });
+          const raw = await liveSessions.languageModel.prompt(detailPrompt, { outputLanguage: langCode });
           let clean = String(raw || '').trim().replace(/^```json\s*|^```|```$/g, '').trim();
           
           // Fix common JSON escaping issues with Japanese and other non-Latin text
@@ -1322,7 +1368,7 @@ Format with clear headings, bullet points, and detailed explanations. Provide co
           if (focus === 'vocabulary') {
             const cacheKey = `${focus}|${targetLang}|${sourceLang}|${strategy}|${text}`;
             const execPromise = (async () => {
-              const result = await finalSessions.languageModel.prompt(prompt, { language: langCode });
+              const result = await finalSessions.languageModel.prompt(prompt, { outputLanguage: langCode });
               console.log(`✅ ${focus} analysis completed successfully, length: ${result.length}`);
               if (usedCompact) {
                 const parsed = this.parseVocabJSONToItems(result);
@@ -1373,7 +1419,7 @@ Format with clear headings, bullet points, and detailed explanations. Provide co
           }
 
           // Non-vocabulary path (no dedupe needed)
-          const result = await finalSessions.languageModel.prompt(prompt, { language: langCode });
+          const result = await finalSessions.languageModel.prompt(prompt, { outputLanguage: langCode });
           console.log(`✅ ${focus} analysis completed successfully, length: ${result.length}`);
           return result;
         } catch (error) {
@@ -1392,6 +1438,24 @@ Format with clear headings, bullet points, and detailed explanations. Provide co
       const errorMsg = error?.message || `${focus} analysis failed`;
       if (focus === 'translate') {
         return '';
+      } else if (focus === 'grammar' || focus === 'verbs') {
+        // Show helpful setup instructions for grammar/verbs mode
+        if (errorMsg.includes('Language Model') || errorMsg.includes('chrome://components')) {
+          return `
+            <div class="polyglot-error" style="text-align: left;">
+              <strong>${focus === 'grammar' ? 'Grammar' : 'Verb'} Analysis Unavailable</strong>
+              <p>This feature requires the Language Model (Gemini Nano).</p>
+              <p><strong>Setup steps:</strong></p>
+              <ol style="margin: 8px 0 8px 20px; padding: 0;">
+                <li>Enable AI flags in <code>chrome://flags/</code></li>
+                <li>Download Gemini Nano in <code>chrome://components/</code></li>
+                <li>Restart Chrome completely</li>
+              </ol>
+              <p style="margin-top: 8px; font-size: 11px;">See CHROME_AI_SETUP.md for detailed instructions.</p>
+            </div>
+          `;
+        }
+        return `⚠️ ${focus} analysis unavailable: ${this.escapeHTML(errorMsg)}`;
       } else if (focus === 'summary') {
         // Show a more helpful summary error message
         if (errorMsg.includes('Chrome 138+')) {
