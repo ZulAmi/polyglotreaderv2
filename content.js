@@ -636,16 +636,16 @@ class PolyglotReader {
           } catch (error) {
             console.error('Translation failed:', error);
             if (error?.message?.includes('user gesture')) {
-              translation = '⚠️ Translator downloading models. Try again in a moment.';
+              translation = 'Translator downloading models. Try again in a moment.';
             } else if (error?.message?.includes('not have enough space')) {
-              translation = '💾 Insufficient storage space. Free up disk space and restart Chrome.';
+              translation = 'Insufficient storage space. Free up disk space and restart Chrome.';
             } else {
               translation = 'Translation not available';
             }
           }
         } else {
           // Fallback when no translator API is available or creation requires a gesture
-          translation = '🔧 Enable Chrome AI flags and restart browser. See extension setup guide.';
+          translation = 'Enable Chrome AI flags and restart browser. See extension setup guide.';
           console.log('⚠️ No translation API available, showing setup message');
         }
 
@@ -746,6 +746,36 @@ class PolyglotReader {
           return; // We already rendered and started the pipeline
         }
 
+        // For grammar/verbs, show a loading indicator since analysis can take time
+        if (learningFocus === 'grammar' || learningFocus === 'verbs') {
+          const content = this.tooltip.querySelector('.polyglot-tooltip-content');
+          if (content && requestId === this.activeRequestId) {
+            const focusName = learningFocus === 'grammar' ? 'Grammar' : 'Verb';
+            content.innerHTML = `
+              <div class="polyglot-content-row">
+                <div class="polyglot-content-column" style="width: 100%;">
+                  <div class="polyglot-original-text polyglot-fade-in">
+                    <div class="label">Original Text</div>
+                    <div class="text">${this.escapeHTML(text)}</div>
+                  </div>
+                </div>
+              </div>
+              <div class="polyglot-learning-content polyglot-fade-in">
+                <div class="polyglot-section-title">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
+                    <path d="M12 6V4M6 18V16M18 18V16M4 12V10M20 12V10M12 20V18M12 14V12M12 8V6" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+                  </svg>
+                  ${focusName} Analysis
+                </div>
+                <div class="polyglot-loading" style="padding: 40px 20px;">
+                  <div class="polyglot-spinner"></div>
+                  Analyzing ${learningFocus}... (This may take 10-30 seconds)
+                </div>
+              </div>
+            `;
+          }
+        }
+
         // Default path for other learning modes
         console.log(`🎯 Getting learning content for focus: ${learningFocus}`);
         learningContent = await this.getLearningContent(text, actualTargetLang, learningFocus, actualSourceLang);
@@ -770,6 +800,12 @@ class PolyglotReader {
       }
 
       // Display results
+      console.log(`🎨 About to display results for ${learningFocus}:`, {
+        hasLearningContent: !!learningContent,
+        learningContentType: typeof learningContent,
+        learningContentLength: learningContent?.length,
+        learningContentPreview: typeof learningContent === 'string' ? learningContent.substring(0, 100) : learningContent
+      });
       this.displayResults(text, translation, pronunciation, actualSourceLang, actualTargetLang, learningContent, learningFocus, requestId);
 
     } catch (error) {
@@ -1350,10 +1386,19 @@ Format with clear headings, bullet points, and detailed explanations. Provide co
           break;
           
         case 'grammar':
-          return await window.PG?.aiEnhanced?.generateGrammar?.(text, targetLang, sourceLang);
+          console.log('[getLearningContent] Calling generateGrammar...');
+          const grammarResult = await window.PG?.aiEnhanced?.generateGrammar?.(text, targetLang, sourceLang);
+          console.log('[getLearningContent] Grammar result type:', typeof grammarResult);
+          console.log('[getLearningContent] Grammar result length:', grammarResult?.length);
+          console.log('[getLearningContent] Grammar result preview:', grammarResult?.substring(0, 100));
+          return grammarResult;
           
         case 'verbs':
-          return await window.PG?.aiEnhanced?.generateVerbs?.(text, targetLang, sourceLang);
+          console.log('[getLearningContent] Calling generateVerbs...');
+          const verbsResult = await window.PG?.aiEnhanced?.generateVerbs?.(text, targetLang, sourceLang);
+          console.log('[getLearningContent] Verbs result type:', typeof verbsResult);
+          console.log('[getLearningContent] Verbs result length:', verbsResult?.length);
+          return verbsResult;
           
         case 'translate':
           // For translate mode, we don't need additional learning content
@@ -1455,22 +1500,22 @@ Format with clear headings, bullet points, and detailed explanations. Provide co
             </div>
           `;
         }
-        return `⚠️ ${focus} analysis unavailable: ${this.escapeHTML(errorMsg)}`;
+        return `${focus} analysis unavailable: ${this.escapeHTML(errorMsg)}`;
       } else if (focus === 'summary') {
         // Show a more helpful summary error message
         if (errorMsg.includes('Chrome 138+')) {
-          return '🔄 Update Chrome to version 138+ for AI summary features';
+          return 'Update Chrome to version 138+ for AI summary features';
         } else if (errorMsg.includes('storage space') || errorMsg.includes('22GB')) {
-          return '💾 Free up storage space (22GB+ needed) for AI summaries';
+          return 'Free up storage space (22GB+ needed) for AI summaries';
         } else if (errorMsg.includes('user gesture') || errorMsg.includes('Select text')) {
-          return '👆 Select text again to activate AI summary features';
+          return 'Select text again to activate AI summary features';
         } else if (errorMsg.includes('downloading') || errorMsg.includes('Try again')) {
-          return '⏳ AI models downloading. Try again in a moment...';
+          return 'AI models downloading. Try again in a moment...';
         } else {
-          return '⚙️ AI summary unavailable. Check Chrome version and settings.';
+          return 'AI summary unavailable. Check Chrome version and settings.';
         }
       } else {
-        return `⚠️ ${focus} analysis unavailable`;
+        return `${focus} analysis unavailable`;
       }
     }
   }
@@ -1488,7 +1533,7 @@ Format with clear headings, bullet points, and detailed explanations. Provide co
   parseVocabJSONToItems(result) { return window.PG?.vocab?.parseVocabJSONToItems(result, this.settings.vocabMaxItems || 12); }
 
   // Render word cards HTML from items
-  renderVocabItems(items) { return window.PG?.vocab?.renderVocabItems(items, this.lastSourceLang || 'auto'); }
+  renderVocabItems(items) { return window.PG?.vocab?.renderVocabItems(items, this.lastSourceLang || 'auto', this.lastTargetLang || 'en'); }
 
   // Keep only source-language pronunciation; strip cross-language labeled lines
   sanitizeVocabPronunciation(items, sourceLang) { return window.PG?.vocab?.sanitizeVocabPronunciation(items, sourceLang); }
@@ -1801,7 +1846,9 @@ Format with clear headings, bullet points, and detailed explanations. Provide co
 
   // Render additional learning content panel for non-translate, non-summary modes
   if (learningContent && learningFocus !== 'translate' && learningFocus !== 'summary') {
-      console.log(`📊 Displaying ${learningFocus} content in UI (${learningContent.length} chars)`);
+      const contentStr = String(learningContent);
+      console.log(`📊 Displaying ${learningFocus} content in UI (${contentStr.length} chars)`);
+      console.log(`📊 Content preview:`, contentStr.substring(0, 200));
       html += `
         <div class="polyglot-learning-content polyglot-fade-in">
           <div class="polyglot-section-title">
@@ -1811,7 +1858,7 @@ Format with clear headings, bullet points, and detailed explanations. Provide co
             ${learningFocus.charAt(0).toUpperCase() + learningFocus.slice(1)} Analysis
           </div>
           <div class="polyglot-learning-body polyglot-${learningFocus}-content">
-            ${learningContent}
+            ${contentStr}
           </div>
         </div>
       `;

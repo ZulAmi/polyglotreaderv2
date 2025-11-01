@@ -119,6 +119,8 @@ window.PG.aiEnhanced.enrichVocabularyItems = async function(items, options = {})
 
 // Grammar Analysis
 window.PG.aiEnhanced.generateGrammar = async function(text, targetLang, sourceLang) {
+  console.log('[Grammar] Called with:', { text: text.substring(0, 50), targetLang, sourceLang });
+  
   // Ensure AI APIs are initialized
   try {
     await window.PG?.ai?.initializeAIAPIs?.();
@@ -127,53 +129,72 @@ window.PG.aiEnhanced.generateGrammar = async function(text, targetLang, sourceLa
   }
 
   const sessions = window.PG?.ai?.getSessions?.() || {};
-  const langCode = window.PG?.lang?.getLanguageCode?.(targetLang);
+  const langCode = window.PG?.lang?.getLanguageCode?.(targetLang) || 'en';
   
-  // Try Proofreader first if available (can return structured suggestions)
-  if (sessions.proofreader?.proofread) {
-    try {
-      const result = await sessions.proofreader.proofread(text);
-      const suggestions = result?.suggestions || result;
-      if (suggestions) {
-        return `🔍 **Grammar Analysis:**\n\n${suggestions}`;
-      }
-    } catch (e) {
-      console.log('Proofreader grammar analysis failed, falling back to Language Model:', e?.message || e);
-    }
-  }
-
-  // Language Model prompt
+  console.log('[Grammar] Sessions:', { 
+    hasLanguageModel: !!sessions.languageModel,
+    langCode 
+  });
+  
+  // Use Language Model for grammar analysis
   if (sessions.languageModel) {
-    const prompt = `Analyze the grammar of "${text}" in detail. Provide:
+    const targetLangName = targetLang || 'English';
+    
+    // Truncate very long text to speed up analysis (keep first 300 chars)
+    const maxLength = 300;
+    const analyzedText = text.length > maxLength ? text.substring(0, maxLength) + '...' : text;
+    const wasTruncated = text.length > maxLength;
+    
+    // Detect if source uses non-Latin script
+    const needsTranslit = ['ja', 'zh', 'ko', 'ar', 'ru', 'hi', 'th', 'he'].includes(sourceLang);
+    const translitInstruction = needsTranslit 
+      ? `\n\nIMPORTANT: For ALL non-English text in your response, include romanization in parentheses.
+Example for Japanese: は (wa), を (wo), である (dearu)
+Example for Chinese: 的 (de), 是 (shì), 了 (le)
+Apply this to ALL sections including Structure, Grammar, and Learning.`
+      : '';
+    
+    const prompt = `Analyze the grammar briefly: "${analyzedText}"
 
-🏗️ **Grammatical Structure:**
-- Sentence type and structure
-- Subject, verb, object identification
-- Clause analysis (main/subordinate)
+Provide a short analysis (3-4 sentences per section):
 
-📝 **Grammar Points:**
-- Tenses used and their functions
-- Parts of speech breakdown
-- Grammatical rules demonstrated
-- Any complex constructions explained
+**Structure:** Main sentence type and key elements (include romanization for non-English examples)
 
-✏️ **Learning Notes:**
-- Common grammar patterns shown
-- Mistakes to avoid
-- Alternative ways to express the same idea
-- Grammar level (beginner/intermediate/advanced)
+**Grammar:** Key tenses and grammatical patterns (include romanization for non-English examples)
 
-🔧 **Corrections & Improvements:**
-- Any errors found and corrections
-- Style suggestions
-- More natural alternatives
+**Learning:** Main takeaway and difficulty (include romanization for non-English examples)
+${translitInstruction}
 
-Format as clear sections with emojis. Respond in ${targetLang}.`;
-    const out = await sessions.languageModel.prompt(prompt, { outputLanguage: langCode });
-    return String(out || '').trim();
-  }
-  
-  // Better error message with instructions
+Keep it very brief. Respond in ${targetLangName}.`;
+    
+    console.log('[Grammar] Using Language Model (Gemini Nano) for grammar analysis');
+    console.log('[Grammar] Text length:', analyzedText.length, wasTruncated ? '(truncated)' : '(full)');
+    console.log('[Grammar] Needs transliteration:', needsTranslit);
+    
+    try {
+      const startTime = Date.now();
+      const out = await sessions.languageModel.prompt(prompt, { 
+        outputLanguage: langCode,
+        temperature: 0.3  // Lower temperature for faster, more focused responses
+      });
+      const elapsed = Date.now() - startTime;
+      const result = String(out || '').trim();
+      
+      console.log('[Grammar] Completed in', elapsed, 'ms');
+      console.log('[Grammar] Result length:', result.length);
+      
+      // Add note if text was truncated
+      const finalResult = wasTruncated 
+        ? `${result}\n\n---\n*Note: Analysis based on first ${maxLength} characters of the original text.*`
+        : result;
+      
+      return finalResult;
+    } catch (error) {
+      console.error('[Grammar] Language Model error:', error);
+      throw error;
+    }
+  }  // Better error message with instructions
+  console.error('[Grammar] No Language Model available');
   throw new Error('Grammar analysis requires Language Model. Please ensure Chrome AI APIs are enabled and Gemini Nano is downloaded (see chrome://components/)');
 };
 
@@ -187,41 +208,65 @@ window.PG.aiEnhanced.generateVerbs = async function(text, targetLang, sourceLang
   }
 
   const sessions = window.PG?.ai?.getSessions?.() || {};
-  const langCode = window.PG?.lang?.getLanguageCode?.(targetLang);
+  const langCode = window.PG?.lang?.getLanguageCode?.(targetLang) || 'en';
   
   if (sessions.languageModel) {
-    const prompt = `Analyze all verbs in "${text}" comprehensively. Provide:
+    const targetLangName = targetLang || 'English';
+    
+    // Truncate very long text to speed up analysis
+    const maxLength = 300;
+    const analyzedText = text.length > maxLength ? text.substring(0, maxLength) + '...' : text;
+    const wasTruncated = text.length > maxLength;
+    
+    // Detect if source uses non-Latin script
+    const needsTranslit = ['ja', 'zh', 'ko', 'ar', 'ru', 'hi', 'th', 'he'].includes(sourceLang);
+    const translitInstruction = needsTranslit 
+      ? `\n\nIMPORTANT: For ALL non-English text in your response, include romanization in parentheses.
+Example for Japanese: 行く (iku), 祀られている (matsurarete iru)
+Example for Chinese: 学习 (xuéxí), 去 (qù)
+Apply this to ALL sections including Tenses, Patterns, and Usage.`
+      : '';
+    
+    const prompt = `Analyze verbs briefly in: "${analyzedText}"
 
-⚡ **Verb Identification:**
-- List all verbs found (main verbs, auxiliary verbs, modal verbs)
-- Verb types (action, linking, helping)
+Short analysis (3-4 sentences per section):
 
-⏰ **Tense & Aspect Analysis:**
-- Present tenses used: ${text}
-- Past tenses used: ${text}  
-- Future tenses used: ${text}
-- Perfect/progressive aspects
-- Time expressions and their relationship to verbs
+**Verbs:** List main verbs found with romanization if non-English
 
-🔄 **Conjugation Patterns:**
-- Regular vs irregular verbs identified
-- Full conjugation of key verbs
-- Stem changes or pattern rules
+**Tenses:** What tenses are used (include romanization for any non-English examples)
 
-📖 **Usage & Meaning:**
-- Verb meanings in context
-- Different meanings of the same verb
-- Phrasal verbs or compound verbs
-- Formal vs informal verb usage
+**Patterns:** Regular or irregular (include romanization for any non-English examples)
 
-🎯 **Learning Focus:**
-- Difficulty level of verb constructions
-- Common mistakes with these verbs
-- Practice suggestions
+**Usage:** Context and formality (include romanization for any non-English examples)
+${translitInstruction}
 
-Format as clear sections with emojis. Respond in ${targetLang}.`;
-    const out = await sessions.languageModel.prompt(prompt, { outputLanguage: langCode });
-    return String(out || '').trim();
+Keep it very brief. Respond in ${targetLangName}.`;
+    
+    console.log('[Verbs] Using Language Model (Gemini Nano) for verb analysis');
+    console.log('[Verbs] Text length:', analyzedText.length, wasTruncated ? '(truncated)' : '(full)');
+    console.log('[Verbs] Needs transliteration:', needsTranslit);
+    
+    try {
+      const startTime = Date.now();
+      const out = await sessions.languageModel.prompt(prompt, { 
+        outputLanguage: langCode,
+        temperature: 0.3
+      });
+      const elapsed = Date.now() - startTime;
+      const result = String(out || '').trim();
+      
+      console.log('[Verbs] Completed in', elapsed, 'ms');
+      console.log('[Verbs] Result length:', result.length);
+      
+      const finalResult = wasTruncated 
+        ? `${result}\n\n---\n*Note: Analysis based on first ${maxLength} characters of the original text.*`
+        : result;
+      
+      return finalResult;
+    } catch (error) {
+      console.error('[Verbs] Language Model error:', error);
+      throw error;
+    }
   }
   
   throw new Error('Verb analysis requires Language Model. Please ensure Chrome AI APIs are enabled and Gemini Nano is downloaded (see chrome://components/)');
@@ -320,6 +365,79 @@ Respond with ONLY the requested information, one per line, no labels.`;
           }
         } catch (e) { 
           console.log(`⚠️ Example translation failed for "${updated.word}":`, e?.message || e); 
+        }
+      }
+    }
+    
+    // Translate and transliterate ALL vocabulary fields if source language is not English
+    if (effectiveSourceLang && effectiveSourceLang !== 'en' && effectiveSourceLang !== 'auto') {
+      const needsFieldTranslation = window.PG.aiEnhanced.needsTransliteration(effectiveSourceLang);
+      
+      if (needsFieldTranslation && sessions?.languageModel && sessions?.translator) {
+        try {
+          // Build list of fields that need translation/transliteration
+          const fieldsToProcess = [];
+          const fieldMapping = {
+            'def': 'Dictionary Definition',
+            'family': 'Word Family',
+            'synonyms': 'Synonyms',
+            'antonyms': 'Antonyms',
+            'collocations': 'Collocations',
+            'etymology': 'Etymology',
+            'cultural': 'Cultural Context'
+          };
+          
+          for (const [field, label] of Object.entries(fieldMapping)) {
+            if (updated[field]) {
+              fieldsToProcess.push({ field, label, text: updated[field] });
+            }
+          }
+          
+          if (fieldsToProcess.length > 0) {
+            console.log(`🌐 Translating ${fieldsToProcess.length} vocabulary fields for "${updated.word}"`);
+            
+            // Get translations using Translator API
+            const translator = await window.PG.aiEnhanced.ensureTranslatorReady(targetLang || 'en', effectiveSourceLang);
+            if (translator) {
+              for (const { field, text } of fieldsToProcess) {
+                try {
+                  const result = await translator.translate(text);
+                  const translation = result?.translatedText || result || '';
+                  if (translation) {
+                    updated[`${field}Translation`] = translation;
+                  }
+                } catch (e) {
+                  console.log(`⚠️ Translation failed for field "${field}":`, e?.message || e);
+                }
+              }
+            }
+            
+            // Get transliterations using LanguageModel
+            const sourceLangName = {
+              'ja': 'Japanese', 'zh': 'Chinese', 'ko': 'Korean',
+              'ar': 'Arabic', 'ru': 'Russian', 'hi': 'Hindi'
+            }[effectiveSourceLang] || effectiveSourceLang;
+            
+            for (const { field, text } of fieldsToProcess) {
+              try {
+                const translitPrompt = `Provide romanization/transliteration for this ${sourceLangName} text. Return ONLY the romanized text with no explanations:
+
+${text}`;
+                
+                const translitResult = await sessions.languageModel.prompt(translitPrompt, { outputLanguage: 'en' });
+                const translit = String(translitResult || '').trim();
+                if (translit) {
+                  updated[`${field}Translit`] = translit;
+                }
+              } catch (e) {
+                console.log(`⚠️ Transliteration failed for field "${field}":`, e?.message || e);
+              }
+            }
+            
+            console.log(`✅ Completed field translations/transliterations for "${updated.word}"`);
+          }
+        } catch (e) {
+          console.log(`⚠️ Field translation/transliteration process failed:`, e?.message || e);
         }
       }
     }
@@ -466,17 +584,15 @@ window.PG.aiEnhanced.generateSummaryWithSummarizer = async function(text, target
     throw new Error('Summarizer session not available. Ensure initialization completed.');
   }
   
-  console.log('🔍 Step 1: Using Summarizer API to generate summary in source language');
-  
-  // Step 1: Generate summary in SOURCE language using Summarizer API
+  // Step 1: Use Summarizer API (outputs in source language despite outputLanguage config)
+  console.log('[Summary] Step 1: Generating summary with Summarizer API');
+  console.log(`[Summary] Input text sample (${sourceLang}):`, text.substring(0, 100));
   const context = 'Create 3-5 clear bullet points highlighting the key information';
-  const result = await sessions.summarizer.summarize(text, { context });
-  const rawSummary = result?.summary || result || 'Summary not available';
+  const summarizerResult = await sessions.summarizer.summarize(text, { context });
+  const rawSummarizerOutput = summarizerResult?.summary || summarizerResult || 'Summary not available';
+  console.log(`[Summary] Raw Summarizer output:`, rawSummarizerOutput.substring(0, 200));
   
-  console.log('📝 Raw summary from Summarizer:', rawSummary.substring(0, 200));
-  
-  // Step 2: Parse into bullet points
-  const summaryPoints = rawSummary
+  const summarizerPoints = rawSummarizerOutput
     .split(/\n+/)
     .map(line => line.trim())
     .filter(line => line.length > 0)
@@ -484,42 +600,193 @@ window.PG.aiEnhanced.generateSummaryWithSummarizer = async function(text, target
     .filter(point => point.length > 5)
     .slice(0, 5);
   
-  console.log(`📌 Extracted ${summaryPoints.length} summary points`);
+  console.log(`[Summary] Summarizer generated ${summarizerPoints.length} summary points (in ${sourceLang})`);
+  console.log(`[Summary] First point sample:`, summarizerPoints[0]?.substring(0, 100));
   
-  // Step 3: Translate each point individually using Translator API
-  let translatedPoints = [...summaryPoints];
+  // Safety check: if no points were extracted, throw error early
+  if (summarizerPoints.length === 0) {
+    console.error('[Summary] ERROR: No summary points extracted from Summarizer output');
+    console.error('[Summary] Raw output was:', rawSummarizerOutput);
+    throw new Error('Failed to extract summary points from Summarizer output');
+  }
   
-  if (targetLang && sourceLang && sourceLang !== 'auto' && targetLang !== sourceLang) {
+  // Check if Summarizer actually returned source language or English
+  let actualSourcePoints = summarizerPoints;
+  const firstPoint = summarizerPoints[0] || '';
+  const appearsToBeEnglish = /^[A-Za-z0-9\s.,!?;:()\-'"]+$/.test(firstPoint);
+  
+  // If Summarizer returned English but we wanted Japanese, use Language Model to generate Japanese summary
+  if (sourceLang === 'ja' && appearsToBeEnglish && sessions?.languageModel) {
+    console.log('[Summary] Summarizer returned English for Japanese text, using Language Model for Japanese summary');
     try {
-      console.log(`🔄 Step 2: Translating ${summaryPoints.length} points from ${sourceLang} to ${targetLang}`);
-      const translator = await window.PG.aiEnhanced.ensureTranslatorReady(targetLang, sourceLang);
+      const jaPrompt = `Summarize this Japanese text in Japanese (3-5 bullet points in Japanese only):
+
+${text}
+
+Return ONLY Japanese bullet points, no English.`;
       
-      if (translator?.translate) {
-        // Translate each point separately for accuracy
-        translatedPoints = await Promise.all(
-          summaryPoints.map(async (point, i) => {
-            try {
-              const translateResult = await translator.translate(point);
-              const translated = translateResult?.translatedText || translateResult || point;
-              console.log(`  ✅ [${i + 1}/${summaryPoints.length}] Translated`);
-              return translated;
-            } catch (e) {
-              console.log(`  ⚠️ [${i + 1}/${summaryPoints.length}] Failed, keeping original`);
-              return point;
-            }
-          })
-        );
-        console.log('✅ All points translated');
-      } else {
-        console.log('⚠️ Translator not available, keeping original language');
+      const jaResult = await sessions.languageModel.prompt(jaPrompt, { outputLanguage: 'ja' });
+      const jaPoints = String(jaResult || '')
+        .split(/\n+/)
+        .map(line => line.trim())
+        .filter(line => line.length > 0)
+        .map(line => line.replace(/^[•\-*►▪︎▫︎◦‣⁃∙]+\s*/, '').replace(/^\d+[\.)]\s*/, '').trim())
+        .filter(point => point.length > 5)
+        .slice(0, 5);
+      
+      if (jaPoints.length > 0) {
+        actualSourcePoints = jaPoints;
+        console.log('[Summary] Generated Japanese summary with Language Model:', jaPoints.length, 'points');
       }
     } catch (e) {
-      console.log('⚠️ Translation failed:', e?.message || e);
+      console.log('[Summary] Language Model Japanese summary failed, using Summarizer output:', e?.message || e);
     }
   }
   
-  // Step 4: Format as HTML
-  const formatPoints = (points) => {
+  // Step 2: Generate transliteration for summarizer output if in non-Latin script
+  let summarizerTranslit = [];
+  const needsTranslit = ['ja', 'zh', 'ko', 'ar', 'ru', 'hi'].includes(sourceLang);
+  
+  if (needsTranslit && sessions?.languageModel && actualSourcePoints.length > 0) {
+    try {
+      console.log(`[Summary] Generating transliteration for ${sourceLang} summary`);
+      
+      const sourceLangName = {
+        'ja': 'Japanese', 'zh': 'Chinese', 'ko': 'Korean', 
+        'ar': 'Arabic', 'ru': 'Russian', 'hi': 'Hindi'
+      }[sourceLang] || sourceLang;
+      
+      const translitType = sourceLang === 'ja' ? 'Hepburn romaji' : 
+                           sourceLang === 'zh' ? 'Hanyu pinyin with tone marks' :
+                           sourceLang === 'ko' ? 'Revised Romanization' :
+                           sourceLang === 'ar' ? 'Arabic romanization' :
+                           sourceLang === 'ru' ? 'Cyrillic romanization' :
+                           'romanization';
+      
+      const translitPrompt = `You are an expert at ${sourceLangName} ${translitType}. Provide accurate, natural ${translitType} for each sentence below. 
+
+Rules:
+- Use standard ${translitType} conventions
+- Maintain proper spacing and word boundaries
+- Preserve punctuation
+- Keep proper nouns capitalized appropriately
+- Return ONLY the romanized text, one line per sentence
+- Do NOT add explanations or translations
+
+Sentences to romanize:
+${actualSourcePoints.map((p, i) => `${i + 1}. ${p}`).join('\n')}`;
+      
+      const translitResult = await sessions.languageModel.prompt(translitPrompt, { outputLanguage: 'en' });
+      const rawTranslit = String(translitResult || '').trim();
+      
+      summarizerTranslit = rawTranslit
+        .split(/\n+/)
+        .map(line => line.trim())
+        .map(line => line.replace(/^\d+[\.)]\s*/, '')) // Remove numbering if present
+        .filter(Boolean)
+        .slice(0, actualSourcePoints.length);
+      
+      console.log(`[Summary] Generated transliteration for ${summarizerTranslit.length} points`);
+      console.log(`[Summary] First translit sample:`, summarizerTranslit[0]?.substring(0, 100));
+    } catch (e) {
+      console.log(`[Summary] Transliteration failed:`, e?.message || e);
+    }
+  }
+  
+  // Step 3: Translate to target language using Translator API (with Language Model fallback)
+  let translatedPoints = [...actualSourcePoints];
+  
+  if (targetLang && sourceLang !== targetLang) {
+    try {
+      console.log(`[Summary] Step 3: Translating ${actualSourcePoints.length} points from ${sourceLang} to ${targetLang}`);
+      
+      // Try Language Model first for Japanese->English (more reliable)
+      if (sourceLang === 'ja' && targetLang === 'en' && sessions?.languageModel) {
+        console.log('[Summary] Using Language Model for Japanese to English translation');
+        try {
+          translatedPoints = await Promise.all(
+            actualSourcePoints.map(async (point, i) => {
+              try {
+                const translatePrompt = `Translate this Japanese text to English. Provide ONLY the English translation, no explanations:
+
+"${point}"`;
+                
+                const result = await sessions.languageModel.prompt(translatePrompt, { outputLanguage: 'en' });
+                const translated = String(result || '').trim();
+                
+                if (translated && translated.length > 0 && !/[\u3040-\u309F\u30A0-\u30FF\u4E00-\u9FAF]/.test(translated)) {
+                  // Valid English translation (no Japanese characters)
+                  console.log(`[Summary] [${i + 1}/${actualSourcePoints.length}] Translated with Language Model`);
+                  return translated;
+                } else {
+                  throw new Error('Translation still contains Japanese characters or is empty');
+                }
+              } catch (e) {
+                console.log(`[Summary] [${i + 1}/${actualSourcePoints.length}] Language Model failed, keeping original`);
+                return point;
+              }
+            })
+          );
+          console.log('[Summary] All points translated with Language Model');
+          console.log('[Summary] First translated sample:', translatedPoints[0]?.substring(0, 100));
+        } catch (e) {
+          console.log('[Summary] Language Model translation batch failed:', e?.message || e);
+          // Fall through to Translator API
+        }
+      } else {
+        // Use Translator API for other language pairs
+        const translator = await window.PG.aiEnhanced.ensureTranslatorReady(targetLang, sourceLang);
+        
+        if (translator?.translate) {
+          translatedPoints = await Promise.all(
+            actualSourcePoints.map(async (point, i) => {
+              try {
+                const translateResult = await translator.translate(point);
+                let translated = translateResult?.translatedText || translateResult || point;
+                
+                // Fix common capitalization issues from Translator API
+                translated = String(translated).trim();
+                
+                // Fix Title Case To Sentence case (common issue with translations)
+                if (translated && /^[A-Z][a-z]+(?: [A-Z][a-z]+)+/.test(translated)) {
+                  // Appears to be Title Case - convert to sentence case
+                  translated = translated
+                    .split(' ')
+                    .map((word, idx) => {
+                      // Keep first word capitalized
+                      if (idx === 0) return word;
+                      // Keep short acronyms (2-3 chars, all caps)
+                      if (word.length <= 3 && word === word.toUpperCase()) return word;
+                      // Lowercase most words (unless they start sentences after punctuation)
+                      return word.toLowerCase();
+                    })
+                    .join(' ');
+                }
+                
+                console.log(`[Summary] [${i + 1}/${actualSourcePoints.length}] Translated`);
+                return translated;
+              } catch (e) {
+                console.log(`[Summary] [${i + 1}/${actualSourcePoints.length}] Failed, keeping original`);
+                return point;
+              }
+            })
+          );
+          console.log('[Summary] All points translated');
+          console.log('[Summary] First translated sample:', translatedPoints[0]?.substring(0, 100));
+        }
+      }
+    } catch (e) {
+      console.log('[Summary] Translation failed:', e?.message || e);
+    }
+  }
+  
+  // Use Summarizer output appropriately for display
+  let sourcePoints = actualSourcePoints;
+  let sourcePointsTranslit = summarizerTranslit;
+  let englishPoints = translatedPoints;
+  
+  // Format as HTML
+  const formatEnglishPoints = (points) => {
     return points
       .map(point => {
         const escaped = point
@@ -531,13 +798,50 @@ window.PG.aiEnhanced.generateSummaryWithSummarizer = async function(text, target
       .join('');
   };
   
-  return {
-    original: formatPoints(summaryPoints),
-    translated: formatPoints(translatedPoints)
+  const formatSourcePoints = (points, translitPoints) => {
+    return points
+      .map((point, i) => {
+        const escaped = point
+          .replace(/&/g, '&amp;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;');
+        
+        let html = `<p class="summary-bullet">• ${escaped}`;
+        
+        // Add transliteration if available
+        if (translitPoints && translitPoints[i]) {
+          const translitEscaped = translitPoints[i]
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;');
+          html += `<br><span style="color: #6b7280; font-size: 0.9em; font-style: italic;">${translitEscaped}</span>`;
+        }
+        
+        html += `</p>`;
+        return html;
+      })
+      .join('');
   };
+  
+  const result = {
+    original: sourcePoints.length > 0 
+      ? formatSourcePoints(sourcePoints, sourcePointsTranslit)  // Source language (Japanese) with transliteration (romaji)
+      : formatEnglishPoints(englishPoints),  // Fallback to English if source language generation failed
+    translated: formatEnglishPoints(englishPoints)  // English translation
+  };
+  
+  console.log('[Summary] Final result:', {
+    hasOriginal: !!result.original,
+    originalLength: result.original?.length,
+    hasTranslated: !!result.translated,
+    translatedLength: result.translated?.length,
+    originalPreview: result.original?.substring(0, 100),
+    translatedPreview: result.translated?.substring(0, 100)
+  });
+  
+  return result;
 };
-
-// Translation Functions
+  
 window.PG.aiEnhanced.translateText = async function(text, targetLang, sourceLang = 'auto') {
   // Try Language Model first for short text
   if (text.length <= 200) {
